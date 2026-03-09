@@ -73,3 +73,69 @@ export function toJson(results: CheckResult[]): string {
     2,
   )
 }
+
+function mdStatusIcon(status: CheckResult['status']): string {
+  switch (status) {
+    case 'pass': return '\u2705'
+    case 'warn': return '\u26A0\uFE0F'
+    case 'fail': return '\u274C'
+    case 'skip': return '\u23ED\uFE0F'
+  }
+}
+
+// Strip ANSI escape codes so markdown output is clean
+function stripAnsi(str: string): string {
+  return str.replace(/\x1B\[[0-9;]*m/g, '')
+}
+
+export function toMarkdown(results: CheckResult[]): string {
+  const now = new Date()
+  const timestamp = now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')
+
+  const lines: string[] = []
+  lines.push('# Codeweather Report')
+  lines.push('')
+  lines.push(`> Generated on ${timestamp}`)
+  lines.push('')
+
+  // Summary table
+  lines.push('## Summary')
+  lines.push('')
+  lines.push('| Status | Check | Result | Duration |')
+  lines.push('|--------|-------|--------|----------|')
+  for (const r of results) {
+    const icon = mdStatusIcon(r.status)
+    lines.push(`| ${icon} | **${r.name}** | ${r.summary} | ${formatDuration(r.duration)} |`)
+  }
+  lines.push('')
+
+  const passed = results.filter((r) => r.status === 'pass').length
+  const warned = results.filter((r) => r.status === 'warn').length
+  const failed = results.filter((r) => r.status === 'fail').length
+  const skipped = results.filter((r) => r.status === 'skip').length
+  const parts: string[] = []
+  if (passed) parts.push(`${passed} passed`)
+  if (warned) parts.push(`${warned} warnings`)
+  if (failed) parts.push(`${failed} failed`)
+  if (skipped) parts.push(`${skipped} skipped`)
+  lines.push(`**${parts.join(' · ')}**`)
+  lines.push('')
+
+  // Detail sections
+  lines.push('---')
+  lines.push('')
+  for (const r of results) {
+    lines.push(`## ${mdStatusIcon(r.status)} ${r.name}`)
+    lines.push('')
+    if (r.output.trim()) {
+      lines.push('```')
+      lines.push(stripAnsi(r.output.trim()))
+      lines.push('```')
+    } else {
+      lines.push('_No output._')
+    }
+    lines.push('')
+  }
+
+  return lines.join('\n')
+}
