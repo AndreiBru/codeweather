@@ -2,7 +2,7 @@ import { mkdirSync, existsSync } from 'node:fs'
 import { resolve, basename } from 'node:path'
 import type { Check, CheckResult } from './types.js'
 import type { ResolvedConfig } from '../config.js'
-import { exec, isOnPath } from '../utils/exec.js'
+import { exec, isOnPath, ownBin } from '../utils/exec.js'
 import { graphvizInstallHint } from '../utils/detect.js'
 
 interface GraphOptions {
@@ -83,7 +83,7 @@ async function generateGraph(
   }
 
   // Generate dot output
-  const depResult = await exec('npx', ['depcruise', ...depcruiseArgs], {
+  const depResult = await exec(ownBin('depcruise'), depcruiseArgs, {
     cwd: config.cwd,
   })
   if (depResult.exitCode !== 0 && !depResult.stdout) {

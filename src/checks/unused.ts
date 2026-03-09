@@ -1,6 +1,6 @@
 import type { Check, CheckResult } from './types.js'
 import type { ResolvedConfig } from '../config.js'
-import { exec } from '../utils/exec.js'
+import { exec, ownBin } from '../utils/exec.js'
 
 export const unusedCheck: Check = {
   name: 'Unused Code',
@@ -11,7 +11,7 @@ export const unusedCheck: Check = {
 
   async run(config: ResolvedConfig): Promise<CheckResult> {
     const start = Date.now()
-    const result = await exec('npx', ['knip', '--no-exit-code'], {
+    const result = await exec(ownBin('knip'), ['--no-exit-code'], {
       cwd: config.cwd,
     })
     const duration = Date.now() - start

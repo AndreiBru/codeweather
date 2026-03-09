@@ -1,6 +1,6 @@
 import type { Check, CheckResult } from './types.js'
 import type { ResolvedConfig } from '../config.js'
-import { exec } from '../utils/exec.js'
+import { exec, ownBin } from '../utils/exec.js'
 
 export const duplicatesCheck: Check = {
   name: 'Code Duplication',
@@ -13,8 +13,8 @@ export const duplicatesCheck: Check = {
     const start = Date.now()
     const formats = config.duplicates.formats.join(',')
     const result = await exec(
-      'npx',
-      ['jscpd', `${config.src}/`, '-f', formats, '-g', '--exitCode', '0'],
+      ownBin('jscpd'),
+      [`${config.src}/`, '-f', formats, '-g', '--exitCode', '0'],
       { cwd: config.cwd },
     )
     const duration = Date.now() - start

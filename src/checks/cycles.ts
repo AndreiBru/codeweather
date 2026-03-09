@@ -2,7 +2,7 @@ import { writeFileSync, unlinkSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Check, CheckResult } from './types.js'
 import type { ResolvedConfig } from '../config.js'
-import { exec } from '../utils/exec.js'
+import { exec, ownBin } from '../utils/exec.js'
 
 function generateDepCruiserConfig(tsConfig: string | undefined): string {
   const tsConfigOption = tsConfig
@@ -52,9 +52,8 @@ export const cyclesCheck: Check = {
       )
 
       const result = await exec(
-        'npx',
+        ownBin('depcruise'),
         [
-          'depcruise',
           config.src,
           '--config',
           tmpConfig,
