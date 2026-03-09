@@ -1,6 +1,6 @@
 {
   "name": "codeweather",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Zero-config code quality audits for JS/TS projects — stats, unused code, duplication, circular deps, and dependency graphs.",
   "type": "module",
   "bin": {
