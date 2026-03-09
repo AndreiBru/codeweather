@@ -46,6 +46,7 @@ function truncateOutput(output: string, top: number): string {
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].startsWith('─') || lines[i].startsWith('—') || lines[i].match(/^-{3,}/)) {
       headerEnd = i + 1
+    } else if (headerEnd > 0) {
       break
     }
   }

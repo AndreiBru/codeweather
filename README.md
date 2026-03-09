@@ -4,22 +4,73 @@ Zero-config code quality audits for JS/TS projects — stats, unused code, dupli
 
 Wraps best-in-class tools into a single command with sensible defaults. No config needed to get started, but everything is configurable when you need it.
 
-## Install
+## Quick start
 
 ```bash
+# 1. Install
 npm install -g codeweather
-# or run directly
-npx codeweather
+
+# 2. Install scc (for codebase stats — optional but recommended)
+brew install scc            # macOS
+# go install github.com/boyter/scc/v3@latest  # or via Go
+
+# 3. Run it
+cd your-project
+codeweather
 ```
 
-### System dependencies
+That's it. codeweather auto-detects your `src` directory, file extensions, and tsconfig. All checks run out of the box.
 
-| Dependency | Required for | Install |
-|---|---|---|
-| [scc](https://github.com/boyter/scc) | `stats` command | `brew install scc` / `go install github.com/boyter/scc/v3@latest` |
-| [Graphviz](https://graphviz.org/) | `graph` command | `brew install graphviz` / `sudo apt install graphviz` |
+### What you'll get on first run
 
-Both are optional — if missing, the relevant check is skipped with an install hint.
+| Check | What it tells you |
+|---|---|
+| **Codebase Stats** | Language breakdown, total lines, code vs comments |
+| **Top Complexity** | Files ranked by cyclomatic complexity (branching logic) |
+| **Top File Size** | Largest files by line count |
+| **Unused Code** | Dead exports, unused files, unlisted dependencies |
+| **Duplicates** | Copy-pasted code blocks across your codebase |
+| **Circular Deps** | Import cycles that can cause subtle bugs |
+
+A markdown report is saved to `codeweather-report.md` after every run.
+
+### Recommended first config
+
+Most projects will want to exclude test fixtures, mocks, and generated files from stats — you don't care if a mock file is 500 lines long, and generated code shouldn't count toward complexity.
+
+Create `codeweather.config.js` in your project root:
+
+```js
+export default {
+  stats: {
+    // Exclude folders/files that are intentionally large or not "real" code
+    exclude: [
+      '**/mock/',
+      '**/mocks/',
+      '**/fixtures/',
+      '**/__fixtures__/',
+      '**/*.test.*',
+      '**/*.spec.*',
+      '**/*.stories.*',
+      '**/generated/',
+    ],
+    // Or exclude entire directories from scc
+    // excludeDir: ['generated', 'vendor'],
+  },
+
+  duplicates: {
+    // Ignore paths where duplication is expected
+    ignore: ['**/__mocks__/**', '**/fixtures/**'],
+  },
+
+  cycles: {
+    // Ignore test helpers and mocks from dependency analysis
+    // exclude: 'mocks|fixtures|__tests__',
+  },
+}
+```
+
+The defaults already exclude `**/mock/` and `**/*.test.*` from stats — the config above extends that with other common patterns.
 
 ## Usage
 
@@ -49,6 +100,15 @@ codeweather graph --focus <file>     # Single file + direct deps
 | `-h, --help` | Show help | |
 | `-v, --version` | Show version | |
 
+### System dependencies
+
+| Dependency | Required for | Install |
+|---|---|---|
+| [scc](https://github.com/boyter/scc) | `stats` command | `brew install scc` / `go install github.com/boyter/scc/v3@latest` |
+| [Graphviz](https://graphviz.org/) | `graph` command | `brew install graphviz` / `sudo apt install graphviz` |
+
+Both are optional — if missing, the relevant check is skipped with an install hint.
+
 ## Configuration
 
 Optional. Create any of the following:
@@ -58,6 +118,67 @@ Optional. Create any of the following:
 - `"codeweather"` key in `package.json`
 
 Config is loaded via [lilconfig](https://github.com/antonk52/lilconfig).
+
+### Common recipes
+
+**Monorepo / non-standard source directory:**
+```js
+export default {
+  src: 'packages/app/src',  // point to your source root
+}
+```
+
+**Exclude generated code and fixtures from all relevant checks:**
+```js
+export default {
+  stats: {
+    exclude: ['**/mock/', '**/*.test.*', '**/generated/'],
+    excludeDir: ['generated', 'vendor', '__snapshots__'],
+  },
+  duplicates: {
+    ignore: ['**/generated/**', '**/fixtures/**'],
+  },
+  cycles: {
+    exclude: 'generated|fixtures',
+  },
+  graph: {
+    exclude: 'generated|fixtures',
+  },
+}
+```
+
+**Only care about unused exports (not unused files/deps):**
+```js
+export default {
+  unused: {
+    include: ['exports', 'types'],
+  },
+}
+```
+
+**Stricter duplicate detection:**
+```js
+export default {
+  duplicates: {
+    mode: 'strict',       // catch more clones (default: 'mild')
+    minLines: 3,          // flag smaller blocks (default: 5)
+    threshold: 5,         // fail CI if duplication exceeds 5%
+  },
+}
+```
+
+**Use your existing tool configs (knip, jscpd, dependency-cruiser):**
+```js
+export default {
+  unused: { configFile: 'knip.json' },
+  duplicates: { configFile: '.jscpd.json' },
+  cycles: { configFile: '.dependency-cruiser.cjs' },
+}
+```
+
+If you already have these tools configured, just point to their config files — codeweather will use them as-is.
+
+### Full reference
 
 All fields are optional. Shown below are the defaults:
 
@@ -141,18 +262,6 @@ export default {
     collapse: undefined,                  // Custom collapse pattern for --layers
     args: [],                             // Extra CLI args passed directly to depcruise
   },
-}
-```
-
-### Using native config files
-
-For full control, point to the tool's own config file. codeweather will use it as-is:
-
-```js
-export default {
-  unused: { configFile: 'knip.json' },
-  duplicates: { configFile: '.jscpd.json' },
-  cycles: { configFile: '.dependency-cruiser.cjs' },
 }
 ```
 
