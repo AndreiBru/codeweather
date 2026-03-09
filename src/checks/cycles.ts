@@ -1,10 +1,13 @@
-import { writeFileSync, unlinkSync } from 'node:fs'
+import { existsSync, writeFileSync, unlinkSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Check, CheckResult } from './types.js'
 import type { ResolvedConfig } from '../config.js'
 import { exec, ownBin } from '../utils/exec.js'
 
-function generateDepCruiserConfig(tsConfig: string | undefined): string {
+function generateDepCruiserConfig(
+  tsConfig: string | undefined,
+  severity: 'error' | 'warn' | 'info',
+): string {
   const tsConfigOption = tsConfig
     ? `tsConfig: { fileName: "./${tsConfig}" },`
     : ''
@@ -14,7 +17,7 @@ module.exports = {
   forbidden: [
     {
       name: "no-circular",
-      severity: "error",
+      severity: "${severity}",
       from: {},
       to: { circular: true },
     },
@@ -37,36 +40,46 @@ export const cyclesCheck: Check = {
   name: 'Circular Dependencies',
 
   async isAvailable() {
-    return true // dependency-cruiser is a bundled dependency
+    return true
   },
 
   async run(config: ResolvedConfig): Promise<CheckResult> {
+    const { cycles } = config
     const start = Date.now()
+
+    // If user provides their own dep-cruiser config, use it directly
+    const useOwnConfig = cycles.configFile && existsSync(resolve(config.cwd, cycles.configFile))
     const tmpConfig = resolve(config.cwd, '.codeaudit-depcruise.cjs')
 
     try {
-      // Write temporary config
-      writeFileSync(
-        tmpConfig,
-        generateDepCruiserConfig(config.cycles.tsConfig),
-      )
+      const configPath = useOwnConfig ? cycles.configFile! : tmpConfig
 
-      const result = await exec(
-        ownBin('depcruise'),
-        [
-          config.src,
-          '--config',
+      if (!useOwnConfig) {
+        writeFileSync(
           tmpConfig,
-          '--include-only',
-          `^${config.src}`,
-        ],
-        { cwd: config.cwd },
-      )
+          generateDepCruiserConfig(cycles.tsConfig, cycles.severity),
+        )
+      }
+
+      const includeOnly = cycles.includeOnly ?? `^${config.src}`
+      const args = [
+        config.src,
+        '--config',
+        configPath,
+        '--include-only',
+        includeOnly,
+      ]
+      if (cycles.exclude) args.push('--exclude', cycles.exclude)
+      if (cycles.doNotFollow) args.push('--do-not-follow', cycles.doNotFollow)
+      if (cycles.metrics) args.push('--metrics')
+      if (cycles.cache) args.push('--cache')
+      args.push(...cycles.args)
+
+      const result = await exec(ownBin('depcruise'), args, { cwd: config.cwd })
       const duration = Date.now() - start
 
       const output = result.stdout
 
-      // dependency-cruiser exits 1 when violations are found
       const hasCycles = result.exitCode !== 0 || output.includes('error no-circular')
 
       return {
@@ -79,10 +92,8 @@ export const cyclesCheck: Check = {
         duration,
       }
     } finally {
-      try {
-        unlinkSync(tmpConfig)
-      } catch {
-        // ignore cleanup errors
+      if (!useOwnConfig) {
+        try { unlinkSync(tmpConfig) } catch { /* ignore */ }
       }
     }
   },

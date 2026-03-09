@@ -15,6 +15,7 @@ async function generateGraph(
   config: ResolvedConfig,
   options: GraphOptions,
 ): Promise<CheckResult> {
+  const { graph: g } = config
   const start = Date.now()
 
   const hasDot = await isOnPath('dot')
@@ -28,7 +29,7 @@ async function generateGraph(
     }
   }
 
-  const outputDir = resolve(config.cwd, config.graph.outputDir)
+  const outputDir = resolve(config.cwd, g.outputDir)
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true })
   }
@@ -40,7 +41,6 @@ async function generateGraph(
   let outputFile: string
 
   if (options.focus) {
-    // Focus mode: single file + direct deps
     const name = basename(options.focus).replace(/\.[^.]*$/, '')
     outputFile = resolve(outputDir, `focus-${name}.svg`)
     depcruiseArgs = [
@@ -56,7 +56,6 @@ async function generateGraph(
       'dot',
     ]
   } else if (options.layers) {
-    // Layer mode: folders as nodes
     outputFile = resolve(outputDir, 'layers.svg')
     depcruiseArgs = [
       src,
@@ -64,12 +63,11 @@ async function generateGraph(
       '--include-only',
       includeOnly,
       '--collapse',
-      `^${src}/[^/]+/`,
+      g.collapse ?? `^${src}/[^/]+/`,
       '-T',
       'dot',
     ]
   } else {
-    // File-level with folder clusters
     const scopeName = options.scope ? basename(options.scope) : 'full'
     outputFile = resolve(outputDir, `graph-${scopeName}.svg`)
     depcruiseArgs = [
@@ -82,7 +80,10 @@ async function generateGraph(
     ]
   }
 
-  // Generate dot output
+  if (g.exclude) depcruiseArgs.push('--exclude', g.exclude)
+  if (g.metrics) depcruiseArgs.push('--metrics')
+  depcruiseArgs.push(...g.args)
+
   const depResult = await exec(ownBin('depcruise'), depcruiseArgs, {
     cwd: config.cwd,
   })
@@ -96,7 +97,6 @@ async function generateGraph(
     }
   }
 
-  // Pipe through dot
   const dotResult = await exec('dot', ['-Tsvg', '-o', outputFile], {
     cwd: config.cwd,
     input: depResult.stdout,
@@ -114,8 +114,7 @@ async function generateGraph(
     }
   }
 
-  // Try to open the SVG
-  if (config.graph.open) {
+  if (g.open) {
     await exec('open', [outputFile], { cwd: config.cwd })
   }
 

@@ -6,39 +6,42 @@ import { sccInstallHint } from '../utils/detect.js'
 type StatsMode = 'overview' | 'complexity' | 'lines' | 'dry'
 
 function buildArgs(config: ResolvedConfig, mode: StatsMode): string[] {
+  const { stats } = config
   const ext = config.extensions.join(',')
-  const base = [config.src, '--no-cocomo', '-i', ext]
+  const base = [config.src, '-i', ext]
+
+  if (stats.noCocomo) base.push('--no-cocomo')
+  if (stats.noDuplicates) base.push('-d')
+  if (stats.format) base.push('-f', stats.format)
+  for (const dir of stats.excludeDir) base.push('--exclude-dir', dir)
+  if (stats.excludeExt.length) base.push('-x', stats.excludeExt.join(','))
+  if (stats.notMatch) base.push('-M', stats.notMatch)
+  if (stats.largeByteCount != null) base.push('--large-byte-count', String(stats.largeByteCount))
 
   switch (mode) {
     case 'overview':
-      return [...base, '--no-min-gen']
+      if (stats.noMinGen) base.push('--no-min-gen')
+      if (stats.wide) base.push('-w')
+      break
     case 'complexity':
-      return [
-        ...base,
-        '-w',
-        '--by-file',
-        '-s',
-        'complexity',
-        '--large-line-count',
-        '99999',
-      ]
+      base.push('-w', '--by-file', '-s', 'complexity')
+      base.push('--large-line-count', String(stats.largeLineCount ?? 99999))
+      break
     case 'lines':
-      return [
-        ...base,
-        '--by-file',
-        '-s',
-        'lines',
-        '--large-line-count',
-        '99999',
-      ]
+      base.push('--by-file', '-s', 'lines')
+      base.push('--large-line-count', String(stats.largeLineCount ?? 99999))
+      break
     case 'dry':
-      return [...base, '-a']
+      base.push('-a')
+      break
   }
+
+  base.push(...stats.args)
+  return base
 }
 
 function truncateOutput(output: string, top: number): string {
   const lines = output.split('\n')
-  // Find the header separator line(s) and keep header + top data lines
   let headerEnd = 0
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].startsWith('─') || lines[i].startsWith('—') || lines[i].match(/^-{3,}/)) {
@@ -47,7 +50,6 @@ function truncateOutput(output: string, top: number): string {
     }
   }
   if (headerEnd === 0) {
-    // No separator found, just truncate
     return lines.slice(0, top + 3).join('\n')
   }
   const header = lines.slice(0, headerEnd)
