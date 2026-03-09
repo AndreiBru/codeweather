@@ -139,7 +139,7 @@ const graphCommand = defineCommand({
 
 const main = defineCommand({
   meta: {
-    name: 'codeaudit',
+    name: 'codeweather',
     version: '0.1.0',
     description:
       'Zero-config code quality audits for JS/TS projects',

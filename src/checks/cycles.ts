@@ -49,7 +49,7 @@ export const cyclesCheck: Check = {
 
     // If user provides their own dep-cruiser config, use it directly
     const useOwnConfig = cycles.configFile && existsSync(resolve(config.cwd, cycles.configFile))
-    const tmpConfig = resolve(config.cwd, '.codeaudit-depcruise.cjs')
+    const tmpConfig = resolve(config.cwd, '.codeweather-depcruise.cjs')
 
     try {
       const configPath = useOwnConfig ? cycles.configFile! : tmpConfig

@@ -5,7 +5,7 @@ import { execa, type Options } from 'execa'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PKG_BIN = resolve(__dirname, '..', 'node_modules', '.bin')
 
-/** Resolve a bundled binary (knip, jscpd, depcruise) from codeaudit's own node_modules */
+/** Resolve a bundled binary (knip, jscpd, depcruise) from codeweather's own node_modules */
 export function ownBin(name: string): string {
   return resolve(PKG_BIN, name)
 }

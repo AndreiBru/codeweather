@@ -156,7 +156,7 @@ export async function loadConfig(
   let u: UserConfig = {}
 
   try {
-    const explorer = lilconfig('codeaudit')
+    const explorer = lilconfig('codeweather')
     const result = flags.config
       ? await explorer.load(flags.config)
       : await explorer.search(cwd)

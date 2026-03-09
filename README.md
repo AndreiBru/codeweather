@@ -1,4 +1,4 @@
-# codeaudit
+# codeweather
 
 Zero-config code quality audits for JS/TS projects — stats, unused code, duplication, circular deps, and dependency graphs.
 
@@ -7,9 +7,9 @@ Wraps best-in-class tools into a single command with sensible defaults. No confi
 ## Install
 
 ```bash
-npm install -g codeaudit
+npm install -g codeweather
 # or run directly
-npx codeaudit
+npx codeweather
 ```
 
 ### System dependencies
@@ -24,18 +24,18 @@ Both are optional — if missing, the relevant check is skipped with an install 
 ## Usage
 
 ```bash
-codeaudit                          # Run all checks
-codeaudit stats                    # Codebase overview via scc
-codeaudit stats --sort complexity  # Top files by branching complexity
-codeaudit stats --sort lines       # Top files by line count
-codeaudit stats --dry              # DRYness score
-codeaudit unused                   # Unused code via knip
-codeaudit duplicates               # Copy-paste detection via jscpd
-codeaudit cycles                   # Circular dependency check
-codeaudit graph                    # File-level dependency graph (SVG)
-codeaudit graph --scope <dir>      # Scoped graph
-codeaudit graph --layers           # Folder-level architecture graph
-codeaudit graph --focus <file>     # Single file + direct deps
+codeweather                          # Run all checks
+codeweather stats                    # Codebase overview via scc
+codeweather stats --sort complexity  # Top files by branching complexity
+codeweather stats --sort lines       # Top files by line count
+codeweather stats --dry              # DRYness score
+codeweather unused                   # Unused code via knip
+codeweather duplicates               # Copy-paste detection via jscpd
+codeweather cycles                   # Circular dependency check
+codeweather graph                    # File-level dependency graph (SVG)
+codeweather graph --scope <dir>      # Scoped graph
+codeweather graph --layers           # Folder-level architecture graph
+codeweather graph --focus <file>     # Single file + direct deps
 ```
 
 ### Global flags
@@ -53,16 +53,16 @@ codeaudit graph --focus <file>     # Single file + direct deps
 
 Optional. Create any of the following:
 
-- `codeaudit.config.js` / `codeaudit.config.cjs`
-- `.codeauditrc.json` / `.codeauditrc.yml`
-- `"codeaudit"` key in `package.json`
+- `codeweather.config.js` / `codeweather.config.cjs`
+- `.codeweatherrc.json` / `.codeweatherrc.yml`
+- `"codeweather"` key in `package.json`
 
 Config is loaded via [lilconfig](https://github.com/antonk52/lilconfig).
 
 All fields are optional. Shown below are the defaults:
 
 ```js
-// codeaudit.config.js
+// codeweather.config.js
 export default {
   // Shared
   src: 'src',                             // Source directory
@@ -146,7 +146,7 @@ export default {
 
 ### Using native config files
 
-For full control, point to the tool's own config file. codeaudit will use it as-is:
+For full control, point to the tool's own config file. codeweather will use it as-is:
 
 ```js
 export default {
@@ -172,14 +172,14 @@ export default {
 ## CI usage
 
 ```bash
-npx codeaudit --json > audit.json
+npx codeweather --json > audit.json
 ```
 
 Exit code is `0` for pass/warn/skip, `1` for any failure.
 
 ## Powered by
 
-codeaudit is a thin orchestration layer over these excellent tools:
+codeweather is a thin orchestration layer over these excellent tools:
 
 | Tool | Author | What it does | License |
 |---|---|---|---|
