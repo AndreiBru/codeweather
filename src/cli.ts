@@ -1,7 +1,8 @@
 import { defineCommand, runMain } from 'citty'
-import { loadConfig } from './config.js'
+import { loadConfig, type ResolvedConfig } from './config.js'
 import { runAll } from './runner.js'
 import { printResult, toJson } from './output.js'
+import type { Check, CheckResult } from './checks/types.js'
 import {
   statsOverview,
   statsComplexity,
@@ -43,6 +44,16 @@ async function resolveConfig(args: Record<string, unknown>) {
   })
 }
 
+async function runSingle(config: ResolvedConfig, check: Check): Promise<never> {
+  const result = await check.run(config)
+  if (config.json) {
+    console.log(toJson([result]))
+  } else {
+    printResult(result)
+  }
+  process.exit(result.status === 'fail' ? 1 : 0)
+}
+
 const statsCommand = defineCommand({
   meta: { name: 'stats', description: 'Codebase overview via scc' },
   args: {
@@ -59,18 +70,11 @@ const statsCommand = defineCommand({
   },
   async run({ args }) {
     const config = await resolveConfig(args)
-    let check = statsOverview
+    let check: Check = statsOverview
     if (args.sort === 'complexity') check = statsComplexity
     else if (args.sort === 'lines') check = statsLines
     else if (args.dry) check = statsDry
-
-    const result = await check.run(config)
-    if (config.json) {
-      console.log(toJson([result]))
-    } else {
-      printResult(result)
-    }
-    process.exit(result.status === 'fail' ? 1 : 0)
+    await runSingle(config, check)
   },
 })
 
@@ -78,14 +82,7 @@ const unusedCommand = defineCommand({
   meta: { name: 'unused', description: 'Unused code via knip' },
   args: globalArgs,
   async run({ args }) {
-    const config = await resolveConfig(args)
-    const result = await unusedCheck.run(config)
-    if (config.json) {
-      console.log(toJson([result]))
-    } else {
-      printResult(result)
-    }
-    process.exit(result.status === 'fail' ? 1 : 0)
+    await runSingle(await resolveConfig(args), unusedCheck)
   },
 })
 
@@ -93,14 +90,7 @@ const duplicatesCommand = defineCommand({
   meta: { name: 'duplicates', description: 'Copy-paste detection via jscpd' },
   args: globalArgs,
   async run({ args }) {
-    const config = await resolveConfig(args)
-    const result = await duplicatesCheck.run(config)
-    if (config.json) {
-      console.log(toJson([result]))
-    } else {
-      printResult(result)
-    }
-    process.exit(result.status === 'fail' ? 1 : 0)
+    await runSingle(await resolveConfig(args), duplicatesCheck)
   },
 })
 
@@ -111,14 +101,7 @@ const cyclesCommand = defineCommand({
   },
   args: globalArgs,
   async run({ args }) {
-    const config = await resolveConfig(args)
-    const result = await cyclesCheck.run(config)
-    if (config.json) {
-      console.log(toJson([result]))
-    } else {
-      printResult(result)
-    }
-    process.exit(result.status === 'fail' ? 1 : 0)
+    await runSingle(await resolveConfig(args), cyclesCheck)
   },
 })
 
@@ -150,13 +133,7 @@ const graphCommand = defineCommand({
       layers: args.layers as boolean,
       focus: args.focus as string | undefined,
     })
-    const result = await check.run(config)
-    if (config.json) {
-      console.log(toJson([result]))
-    } else {
-      printResult(result)
-    }
-    process.exit(result.status === 'fail' ? 1 : 0)
+    await runSingle(config, check)
   },
 })
 
