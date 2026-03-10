@@ -87,6 +87,9 @@ codeweather graph                    # File-level dependency graph (SVG)
 codeweather graph --scope <dir>      # Scoped graph
 codeweather graph --layers           # Folder-level architecture graph
 codeweather graph --focus <file>     # Single file + direct deps
+codeweather backfill                 # Create snapshots for the last 10 commits
+codeweather backfill --commits 50    # Backfill last 50 commits
+codeweather backfill --no-install    # Symlink node_modules instead of installing (faster)
 codeweather history                  # Snapshot history table
 codeweather history --last 10        # Show only the latest 10 snapshots
 codeweather dashboard                # Generate HTML dashboard from snapshots
@@ -126,6 +129,28 @@ Once you have at least one full run, codeweather becomes a trend tracker:
 - The terminal summary prints a one-line trend comparison against the previous snapshot when available.
 - Use `--no-history` for one-off runs you do not want recorded.
 - Add `.codeweather/` to your project's `.gitignore` so routine runs do not dirty your worktree.
+
+### Backfilling history
+
+Don't have snapshot history yet? `codeweather backfill` retroactively generates snapshots for past commits so you get trend charts and history tables immediately:
+
+```bash
+codeweather backfill                  # Last 10 commits
+codeweather backfill --commits 50     # Last 50 commits
+codeweather backfill --no-install     # Faster: reuse current node_modules
+```
+
+How it works:
+
+1. Gets the last N commits from your git history
+2. For each commit, creates a temporary **git worktree** (your working tree stays untouched)
+3. Installs dependencies matching that commit's lockfile (pnpm/npm/yarn/bun auto-detected)
+4. Runs all checks and saves the snapshot with the commit's original author date
+5. Cleans up the worktree and moves to the next commit
+
+Commits that already have snapshots are skipped automatically, so re-running is safe.
+
+**`--no-install`** skips dependency installation and symlinks your current `node_modules` into each worktree instead. This is much faster but less accurate if dependencies changed significantly between commits. Good for a quick overview; use the default for precision.
 
 ## Configuration
 

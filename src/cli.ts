@@ -19,6 +19,7 @@ import { renderDashboardHtml } from './dashboard/render.js'
 import { renderHistoryTable } from './history/render.js'
 import { getHistoryDir, loadSnapshots } from './history/store.js'
 import { openPath } from './utils/open.js'
+import { runBackfill } from './backfill.js'
 
 const globalArgs = {
   src: {
@@ -238,6 +239,41 @@ const dashboardCommand = defineCommand({
   },
 })
 
+const backfillCommand = defineCommand({
+  meta: { name: 'backfill', description: 'Create snapshots for past commits' },
+  args: {
+    ...globalArgs,
+    commits: {
+      type: 'string' as const,
+      description: 'Number of past commits (default: 10)',
+    },
+    noInstall: {
+      type: 'boolean' as const,
+      description: 'Symlink node_modules instead of installing per commit',
+      default: false,
+    },
+  },
+  async run({ args }) {
+    const config = await resolveConfig(args)
+    const cwd = process.cwd()
+    const commits = args.commits ? Number(args.commits) : 10
+
+    if (!Number.isFinite(commits) || commits < 1) {
+      console.error('--commits must be a positive number')
+      process.exit(1)
+    }
+
+    await runBackfill({
+      cwd,
+      commits,
+      noInstall: args.noInstall as boolean,
+      config,
+    })
+
+    process.exit(0)
+  },
+})
+
 const main = defineCommand({
   meta: {
     name: 'codeweather',
@@ -254,6 +290,7 @@ const main = defineCommand({
     graph: graphCommand,
     history: historyCommand,
     dashboard: dashboardCommand,
+    backfill: backfillCommand,
   },
   async run({ args }) {
     const config = await resolveConfig(args)
