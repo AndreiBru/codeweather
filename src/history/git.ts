@@ -1,6 +1,39 @@
 import type { SnapshotGitMeta } from './types.js'
 import { exec } from '../utils/exec.js'
 
+export interface CommitInfo {
+  hash: string
+  shortHash: string
+  authorDate: string
+  message: string
+}
+
+export async function getCommitList(cwd: string, count: number): Promise<CommitInfo[]> {
+  const result = await exec(
+    'git',
+    ['log', `--format=%H%n%h%n%aI%n%s`, `-n`, String(count)],
+    { cwd },
+  )
+
+  if (result.exitCode !== 0 || !result.stdout.trim()) {
+    return []
+  }
+
+  const lines = result.stdout.trim().split('\n')
+  const commits: CommitInfo[] = []
+
+  for (let i = 0; i + 3 < lines.length; i += 4) {
+    commits.push({
+      hash: lines[i],
+      shortHash: lines[i + 1],
+      authorDate: lines[i + 2],
+      message: lines[i + 3],
+    })
+  }
+
+  return commits
+}
+
 export async function getGitMeta(cwd: string): Promise<SnapshotGitMeta | undefined> {
   const insideWorkTree = await exec('git', ['rev-parse', '--is-inside-work-tree'], {
     cwd,

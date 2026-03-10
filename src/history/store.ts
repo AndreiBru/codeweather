@@ -122,6 +122,24 @@ export function pruneSnapshots(
   return extra.length
 }
 
+export function getExistingCommitHashes(cwd: string, historyDir: string): Set<string> {
+  const snapshotDir = getSnapshotDir(cwd, historyDir)
+  if (!existsSync(snapshotDir)) {
+    return new Set()
+  }
+
+  const hashes = new Set<string>()
+  for (const name of readdirSync(snapshotDir)) {
+    if (!name.endsWith('.json')) continue
+    // Filename format: {timestamp}_{commit}.json
+    const match = name.match(/_([^_]+)\.json$/)
+    if (match && match[1] !== 'nogit') {
+      hashes.add(match[1])
+    }
+  }
+  return hashes
+}
+
 function listSnapshotFiles(snapshotDir: string, limit?: number): string[] {
   const names = readdirSync(snapshotDir)
     .filter((name) => name.endsWith('.json'))

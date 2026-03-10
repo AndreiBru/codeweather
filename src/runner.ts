@@ -26,13 +26,22 @@ const defaultChecks: Check[] = [
   cyclesCheck,
 ]
 
+export async function runChecks(config: ResolvedConfig): Promise<CheckResult[]> {
+  const results: CheckResult[] = []
+  for (const check of defaultChecks) {
+    const result = await check.run(config)
+    results.push(result)
+  }
+  return results
+}
+
 export async function runAll(config: ResolvedConfig): Promise<number> {
   const runStart = Date.now()
-  const results: CheckResult[] = []
   const previousSnapshot = config.history.enabled
     ? loadLatestSnapshot(config.cwd, config.history.dir)
     : undefined
 
+  const results: CheckResult[] = []
   for (const check of defaultChecks) {
     const result = await check.run(config)
     results.push(result)
