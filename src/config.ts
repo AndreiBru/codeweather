@@ -191,7 +191,7 @@ export async function loadConfig(
     stats: {
       top,
       exclude: u.stats?.exclude ?? ['**/mock/', '**/*.test.*'],
-      excludeDir: u.stats?.excludeDir ?? [],
+      excludeDir: u.stats?.excludeDir ?? ['node_modules', '.git', '.codeweather'],
       excludeExt: u.stats?.excludeExt ?? [],
       notMatch: u.stats?.notMatch,
       wide: u.stats?.wide ?? false,
