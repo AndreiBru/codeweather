@@ -1,7 +1,7 @@
 {
   "name": "codeweather",
-  "version": "0.2.1",
-  "description": "Zero-config code quality audits for JS/TS projects — stats, unused code, duplication, circular deps, and dependency graphs.",
+  "version": "0.3.0",
+  "description": "Zero-config code quality audits for JS/TS projects with trend history and a self-contained dashboard.",
   "type": "module",
   "bin": {
     "codeweather": "./bin/codeweather.js"
@@ -24,6 +24,9 @@
     "duplicates",
     "circular-dependencies",
     "dependency-graph",
+    "dashboard",
+    "trending",
+    "history",
     "scc",
     "knip",
     "jscpd",
@@ -36,6 +39,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "chart.js": "^4.5.1",
     "citty": "0.1.6",
     "dependency-cruiser": "17.3.8",
     "execa": "9.6.1",

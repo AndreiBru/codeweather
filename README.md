@@ -32,7 +32,7 @@ That's it. codeweather auto-detects your `src` directory, file extensions, and t
 | **Duplicates** | Copy-pasted code blocks across your codebase |
 | **Circular Deps** | Import cycles that can cause subtle bugs |
 
-A markdown report is saved to `codeweather-report.md` after every run.
+A markdown report is saved to `codeweather-report.md` after every run. Full runs also store structured snapshots in `.codeweather/snapshots/` so you can track trends over time.
 
 ### Recommended first config
 
@@ -87,6 +87,12 @@ codeweather graph                    # File-level dependency graph (SVG)
 codeweather graph --scope <dir>      # Scoped graph
 codeweather graph --layers           # Folder-level architecture graph
 codeweather graph --focus <file>     # Single file + direct deps
+codeweather history                  # Snapshot history table
+codeweather history --last 10        # Show only the latest 10 snapshots
+codeweather dashboard                # Generate HTML dashboard from snapshots
+codeweather dashboard --last 25      # Build dashboard from the latest 25 snapshots
+codeweather dashboard --output reports/quality.html
+codeweather dashboard --no-open      # Generate dashboard without opening it
 ```
 
 ### Global flags
@@ -97,6 +103,7 @@ codeweather graph --focus <file>     # Single file + direct deps
 | `--config <path>` | Config file path | Auto-detect |
 | `--json` | JSON output (for CI) | `false` |
 | `--top <n>` | Number of files in ranked lists | `25` |
+| `--no-history` | Skip saving a snapshot for this run | `false` |
 | `-h, --help` | Show help | |
 | `-v, --version` | Show version | |
 
@@ -108,6 +115,17 @@ codeweather graph --focus <file>     # Single file + direct deps
 | [Graphviz](https://graphviz.org/) | `graph` command | `brew install graphviz` / `sudo apt install graphviz` |
 
 Both are optional — if missing, the relevant check is skipped with an install hint.
+
+## Trending workflow
+
+Once you have at least one full run, codeweather becomes a trend tracker:
+
+- `codeweather history` prints a terminal-friendly table with timestamp, commit, status counts, and key trend metrics.
+- `codeweather dashboard` generates `.codeweather/dashboard.html`, a self-contained dashboard with Chart.js line charts, range controls, and a snapshot table.
+- `codeweather dashboard --output <path>` writes the dashboard to a specific location for CI artifacts or docs publishing.
+- The terminal summary prints a one-line trend comparison against the previous snapshot when available.
+- Use `--no-history` for one-off runs you do not want recorded.
+- Add `.codeweather/` to your project's `.gitignore` so routine runs do not dirty your worktree.
 
 ## Configuration
 
@@ -262,7 +280,22 @@ export default {
     collapse: undefined,                  // Custom collapse pattern for --layers
     args: [],                             // Extra CLI args passed directly to depcruise
   },
+
+  history: {
+    enabled: true,                        // Save snapshots after full runs
+    dir: '.codeweather',                  // Snapshot + dashboard directory
+    maxSnapshots: undefined,              // Keep only the newest N snapshots
+  },
 }
+```
+
+### Project `.gitignore`
+
+Add codeweather's generated artifacts to your project ignore file:
+
+```gitignore
+.codeweather/
+codeweather-report.md
 ```
 
 ### The `args` escape hatch
@@ -298,7 +331,7 @@ codeweather is a thin orchestration layer over these excellent tools:
 | [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) | Sander Verweij | Dependency analysis, circular dep detection, graph generation | MIT |
 | [Graphviz](https://graphviz.org/) | AT&T / open source | Graph visualization (DOT → SVG rendering) | EPL |
 
-Also built with: [citty](https://github.com/unjs/citty) (CLI), [execa](https://github.com/sindresorhus/execa) (process exec), [picocolors](https://github.com/alexeyraspopov/picocolors) (terminal colors), [lilconfig](https://github.com/antonk52/lilconfig) (config loading), [tsup](https://github.com/egoist/tsup) (bundling).
+Also built with: [citty](https://github.com/unjs/citty) (CLI), [Chart.js](https://www.chartjs.org/) (dashboard charts), [execa](https://github.com/sindresorhus/execa) (process exec), [picocolors](https://github.com/alexeyraspopov/picocolors) (terminal colors), [lilconfig](https://github.com/antonk52/lilconfig) (config loading), [tsup](https://github.com/egoist/tsup) (bundling).
 
 ## License
 

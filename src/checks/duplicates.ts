@@ -1,6 +1,97 @@
-import type { Check, CheckResult } from './types.js'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import type { Check, CheckResult, DuplicatesMetrics } from './types.js'
 import type { ResolvedConfig } from '../config.js'
 import { exec, ownBin } from '../utils/exec.js'
+import { stripFlagPairs } from '../utils/args.js'
+
+interface JscpdReport {
+  statistics?: {
+    total?: {
+      clones?: number
+      percentage?: number
+      percentageTokens?: number
+      lines?: number
+    }
+  }
+}
+
+function buildArgs(
+  config: ResolvedConfig,
+  options: { jsonOutputDir?: string } = {},
+): string[] {
+  const { duplicates: duplicatesConfig } = config
+  const formats = duplicatesConfig.formats.join(',')
+
+  const args = [`${config.src}/`, '-f', formats, '--exitCode', '0']
+  if (duplicatesConfig.gitignore) args.push('-g')
+  if (duplicatesConfig.configFile) args.push('-c', duplicatesConfig.configFile)
+  if (duplicatesConfig.minLines != null) args.push('-l', String(duplicatesConfig.minLines))
+  if (duplicatesConfig.minTokens != null) args.push('-k', String(duplicatesConfig.minTokens))
+  if (duplicatesConfig.maxLines != null) args.push('-x', String(duplicatesConfig.maxLines))
+  if (duplicatesConfig.maxSize) args.push('-z', duplicatesConfig.maxSize)
+  if (duplicatesConfig.threshold != null) args.push('-t', String(duplicatesConfig.threshold))
+  if (duplicatesConfig.mode !== 'mild') args.push('-m', duplicatesConfig.mode)
+  if (duplicatesConfig.skipLocal) args.push('--skipLocal')
+  if (duplicatesConfig.ignorePattern) args.push('--ignore-pattern', duplicatesConfig.ignorePattern)
+  for (const ignore of duplicatesConfig.ignore) args.push('-i', ignore)
+
+  const extraArgs = options.jsonOutputDir
+    ? stripFlagPairs(duplicatesConfig.args, new Set(['-r', '--reporters', '-o', '--output']))
+    : duplicatesConfig.args
+
+  if (!options.jsonOutputDir && duplicatesConfig.reporters.length) {
+    args.push('-r', duplicatesConfig.reporters.join(','))
+  }
+
+  args.push(...extraArgs)
+
+  if (options.jsonOutputDir) {
+    args.push('-r', 'json', '-o', options.jsonOutputDir)
+  }
+
+  return args
+}
+
+export function parseJscpdMetrics(output: string): DuplicatesMetrics | undefined {
+  try {
+    const parsed = JSON.parse(output) as JscpdReport
+    const totals = parsed.statistics?.total
+    if (!totals) {
+      return undefined
+    }
+
+    return {
+      kind: 'duplicates',
+      totalClones: totals.clones ?? 0,
+      duplicatedLinesPercent: totals.percentage ?? 0,
+      duplicatedTokensPercent: totals.percentageTokens ?? 0,
+      totalLines: totals.lines ?? 0,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+async function extractMetrics(config: ResolvedConfig): Promise<DuplicatesMetrics | undefined> {
+  const outputDir = mkdtempSync(join(tmpdir(), 'codeweather-jscpd-'))
+  const reportPath = resolve(outputDir, 'jscpd-report.json')
+
+  try {
+    const result = await exec(ownBin('jscpd'), buildArgs(config, { jsonOutputDir: outputDir }), {
+      cwd: config.cwd,
+    })
+
+    if (result.exitCode !== 0 || !existsSync(reportPath)) {
+      return undefined
+    }
+
+    return parseJscpdMetrics(readFileSync(reportPath, 'utf8'))
+  } finally {
+    rmSync(outputDir, { recursive: true, force: true })
+  }
+}
 
 export const duplicatesCheck: Check = {
   name: 'Code Duplication',
@@ -10,32 +101,18 @@ export const duplicatesCheck: Check = {
   },
 
   async run(config: ResolvedConfig): Promise<CheckResult> {
-    const { duplicates: d } = config
     const start = Date.now()
-    const formats = d.formats.join(',')
-
-    const args = [`${config.src}/`, '-f', formats, '--exitCode', '0']
-    if (d.gitignore) args.push('-g')
-    if (d.configFile) args.push('-c', d.configFile)
-    if (d.minLines != null) args.push('-l', String(d.minLines))
-    if (d.minTokens != null) args.push('-k', String(d.minTokens))
-    if (d.maxLines != null) args.push('-x', String(d.maxLines))
-    if (d.maxSize) args.push('-z', d.maxSize)
-    if (d.threshold != null) args.push('-t', String(d.threshold))
-    if (d.mode !== 'mild') args.push('-m', d.mode)
-    if (d.skipLocal) args.push('--skipLocal')
-    if (d.ignorePattern) args.push('--ignore-pattern', d.ignorePattern)
-    for (const i of d.ignore) args.push('-i', i)
-    if (d.reporters.length) args.push('-r', d.reporters.join(','))
-    args.push(...d.args)
-
-    const result = await exec(ownBin('jscpd'), args, { cwd: config.cwd })
+    const result = await exec(ownBin('jscpd'), buildArgs(config), { cwd: config.cwd })
     const duration = Date.now() - start
 
     const output = result.stdout + (result.stderr ? '\n' + result.stderr : '')
+    const metrics = await extractMetrics(config)
 
-    const hasDuplicates =
-      output.includes('Clone found') || output.match(/Found \d+ clones/)
+    const hasDuplicates = metrics
+      ? metrics.totalClones > 0
+      : (
+        output.includes('Clone found') || output.match(/Found \d+ clones/)
+      )
 
     return {
       name: 'Code Duplication',
@@ -45,6 +122,7 @@ export const duplicatesCheck: Check = {
         : 'No significant duplication detected',
       output: result.stdout,
       duration,
+      metrics,
     }
   },
 }

@@ -4,6 +4,7 @@ import type { Check, CheckResult } from './types.js'
 import type { ResolvedConfig } from '../config.js'
 import { exec, isOnPath, ownBin } from '../utils/exec.js'
 import { graphvizInstallHint } from '../utils/detect.js'
+import { openPath } from '../utils/open.js'
 
 interface GraphOptions {
   scope?: string
@@ -115,7 +116,7 @@ async function generateGraph(
   }
 
   if (g.open) {
-    await exec('open', [outputFile], { cwd: config.cwd })
+    await openPath(outputFile, config.cwd)
   }
 
   return {

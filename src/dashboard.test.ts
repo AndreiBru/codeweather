@@ -1,0 +1,161 @@
+import { describe, expect, it } from 'vitest'
+import { renderDashboardHtml } from './dashboard/render.js'
+import { renderHistoryTable } from './history/render.js'
+import { createSnapshot } from './history/store.js'
+
+const snapshots = [
+  createSnapshot({
+    timestamp: '2026-03-10T10:00:00.000Z',
+    duration: 100,
+    git: { commit: 'aaa1111', branch: 'main', dirty: false },
+    results: [
+      {
+        name: 'Codebase Stats',
+        status: 'pass',
+        summary: 'ok',
+        duration: 1,
+        output: '',
+        metrics: {
+          kind: 'stats-overview',
+          totalFiles: 10,
+          totalLines: 100,
+          totalCode: 80,
+          totalComplexity: 20,
+          totalBlanks: 10,
+          totalComments: 10,
+          languages: [],
+        },
+      },
+      {
+        name: 'Unused Code',
+        status: 'warn',
+        summary: 'ok',
+        duration: 1,
+        output: '',
+        metrics: {
+          kind: 'unused',
+          unusedFiles: 0,
+          unusedExports: 1,
+          unusedTypes: 0,
+          unusedDependencies: 0,
+          totalIssues: 1,
+        },
+      },
+      {
+        name: 'Code Duplication',
+        status: 'warn',
+        summary: 'ok',
+        duration: 1,
+        output: '',
+        metrics: {
+          kind: 'duplicates',
+          totalClones: 1,
+          duplicatedLinesPercent: 1.2,
+          duplicatedTokensPercent: 1.4,
+          totalLines: 100,
+        },
+      },
+      {
+        name: 'Circular Dependencies',
+        status: 'pass',
+        summary: 'ok',
+        duration: 1,
+        output: '',
+        metrics: {
+          kind: 'cycles',
+          totalModules: 10,
+          totalDependencies: 12,
+          cycleCount: 0,
+        },
+      },
+    ],
+  }),
+  createSnapshot({
+    timestamp: '2026-03-10T11:00:00.000Z',
+    duration: 120,
+    git: { commit: 'bbb2222', branch: 'main', dirty: true },
+    results: [
+      {
+        name: 'Codebase Stats',
+        status: 'pass',
+        summary: 'ok',
+        duration: 1,
+        output: '',
+        metrics: {
+          kind: 'stats-overview',
+          totalFiles: 10,
+          totalLines: 120,
+          totalCode: 90,
+          totalComplexity: 24,
+          totalBlanks: 12,
+          totalComments: 18,
+          languages: [],
+        },
+      },
+      {
+        name: 'Unused Code',
+        status: 'warn',
+        summary: 'ok',
+        duration: 1,
+        output: '',
+        metrics: {
+          kind: 'unused',
+          unusedFiles: 0,
+          unusedExports: 1,
+          unusedTypes: 0,
+          unusedDependencies: 0,
+          totalIssues: 2,
+        },
+      },
+      {
+        name: 'Code Duplication',
+        status: 'warn',
+        summary: 'ok',
+        duration: 1,
+        output: '',
+        metrics: {
+          kind: 'duplicates',
+          totalClones: 2,
+          duplicatedLinesPercent: 1.5,
+          duplicatedTokensPercent: 2.1,
+          totalLines: 120,
+        },
+      },
+      {
+        name: 'Circular Dependencies',
+        status: 'pass',
+        summary: 'ok',
+        duration: 1,
+        output: '',
+        metrics: {
+          kind: 'cycles',
+          totalModules: 11,
+          totalDependencies: 14,
+          cycleCount: 1,
+        },
+      },
+    ],
+  }),
+]
+
+describe('history rendering', () => {
+  it('renders a readable history table', () => {
+    const table = renderHistoryTable(snapshots)
+
+    expect(table).toContain('Timestamp')
+    expect(table).toContain('bbb2222*')
+    expect(table).toContain('1.5%')
+  })
+})
+
+describe('dashboard rendering', () => {
+  it('renders self-contained html with Chart.js charts and controls', () => {
+    const html = renderDashboardHtml('/tmp/project-name', snapshots)
+
+    expect(html).toContain('<!doctype html>')
+    expect(html).toContain('project-name')
+    expect(html).toContain('new Chart')
+    expect(html).toContain('range-controls')
+    expect(html).toContain('Hide Table')
+  })
+})

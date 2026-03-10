@@ -68,6 +68,11 @@ export interface UserConfig {
     collapse?: string
     args?: string[]
   }
+  history?: {
+    enabled?: boolean
+    dir?: string
+    maxSnapshots?: number
+  }
 }
 
 export interface ResolvedConfig {
@@ -140,6 +145,11 @@ export interface ResolvedConfig {
     collapse: string | undefined
     args: string[]
   }
+  history: {
+    enabled: boolean
+    dir: string
+    maxSnapshots: number | undefined
+  }
 }
 
 export interface CLIFlags {
@@ -147,6 +157,7 @@ export interface CLIFlags {
   config?: string
   json?: boolean
   top?: number
+  noHistory?: boolean
 }
 
 export async function loadConfig(
@@ -240,6 +251,11 @@ export async function loadConfig(
       metrics: u.graph?.metrics ?? false,
       collapse: u.graph?.collapse,
       args: u.graph?.args ?? [],
+    },
+    history: {
+      enabled: flags.noHistory ? false : (u.history?.enabled ?? true),
+      dir: u.history?.dir ?? '.codeweather',
+      maxSnapshots: u.history?.maxSnapshots,
     },
   }
 }

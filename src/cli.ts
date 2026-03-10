@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { defineCommand, runMain } from 'citty'
 import { loadConfig, type ResolvedConfig } from './config.js'
 import { runAll } from './runner.js'
@@ -13,6 +15,10 @@ import { unusedCheck } from './checks/unused.js'
 import { duplicatesCheck } from './checks/duplicates.js'
 import { cyclesCheck } from './checks/cycles.js'
 import { createGraphCheck } from './checks/graph.js'
+import { renderDashboardHtml } from './dashboard/render.js'
+import { renderHistoryTable } from './history/render.js'
+import { getHistoryDir, loadSnapshots } from './history/store.js'
+import { openPath } from './utils/open.js'
 
 const globalArgs = {
   src: {
@@ -32,6 +38,11 @@ const globalArgs = {
     type: 'string' as const,
     description: 'Number of files in ranked lists (default: 25)',
   },
+  noHistory: {
+    type: 'boolean' as const,
+    description: 'Skip saving snapshot history for this run',
+    default: false,
+  },
 }
 
 async function resolveConfig(args: Record<string, unknown>) {
@@ -41,7 +52,17 @@ async function resolveConfig(args: Record<string, unknown>) {
     config: args.config as string | undefined,
     json: args.json as boolean | undefined,
     top: args.top ? Number(args.top) : undefined,
+    noHistory: args.noHistory as boolean | undefined,
   })
+}
+
+function parseLimit(value: unknown): number | undefined {
+  if (value == null) {
+    return undefined
+  }
+
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
 }
 
 async function runSingle(config: ResolvedConfig, check: Check): Promise<never> {
@@ -137,12 +158,92 @@ const graphCommand = defineCommand({
   },
 })
 
+const historyCommand = defineCommand({
+  meta: {
+    name: 'history',
+    description: 'List stored snapshots and trend summaries',
+  },
+  args: {
+    ...globalArgs,
+    last: {
+      type: 'string' as const,
+      description: 'Show only the most recent N snapshots',
+    },
+  },
+  async run({ args }) {
+    const config = await resolveConfig(args)
+    const snapshots = loadSnapshots(config.cwd, config.history.dir, parseLimit(args.last))
+
+    if (config.json) {
+      console.log(JSON.stringify(snapshots, null, 2))
+    } else {
+      console.log(renderHistoryTable(snapshots))
+    }
+
+    process.exit(0)
+  },
+})
+
+const dashboardCommand = defineCommand({
+  meta: {
+    name: 'dashboard',
+    description: 'Generate an HTML dashboard from snapshot history',
+  },
+  args: {
+    ...globalArgs,
+    last: {
+      type: 'string' as const,
+      description: 'Use only the most recent N snapshots',
+    },
+    output: {
+      type: 'string' as const,
+      description: 'Write dashboard HTML to a specific path',
+    },
+    noOpen: {
+      type: 'boolean' as const,
+      description: 'Generate the dashboard without opening it',
+      default: false,
+    },
+  },
+  async run({ args }) {
+    const config = await resolveConfig(args)
+    const snapshots = loadSnapshots(config.cwd, config.history.dir, parseLimit(args.last))
+
+    if (snapshots.length === 0) {
+      console.error('No snapshots found. Run `codeweather` first to generate history.')
+      process.exit(1)
+    }
+
+    const historyDir = getHistoryDir(config.cwd, config.history.dir)
+    mkdirSync(historyDir, { recursive: true })
+
+    const outputPath = args.output
+      ? resolve(config.cwd, args.output as string)
+      : resolve(historyDir, 'dashboard.html')
+    mkdirSync(dirname(outputPath), { recursive: true })
+    const html = renderDashboardHtml(config.cwd, snapshots)
+    writeFileSync(outputPath, html)
+
+    if (config.json) {
+      console.log(JSON.stringify({ outputPath, snapshots: snapshots.length }, null, 2))
+    } else {
+      console.log(`Dashboard saved to ${outputPath}`)
+    }
+
+    if (!args.noOpen && !config.json) {
+      await openPath(outputPath, config.cwd)
+    }
+
+    process.exit(0)
+  },
+})
+
 const main = defineCommand({
   meta: {
     name: 'codeweather',
-    version: '0.1.0',
+    version: '0.3.0',
     description:
-      'Zero-config code quality audits for JS/TS projects',
+      'Zero-config code quality audits for JS/TS projects with trend history and a dashboard',
   },
   args: globalArgs,
   subCommands: {
@@ -151,6 +252,8 @@ const main = defineCommand({
     duplicates: duplicatesCommand,
     cycles: cyclesCommand,
     graph: graphCommand,
+    history: historyCommand,
+    dashboard: dashboardCommand,
   },
   async run({ args }) {
     const config = await resolveConfig(args)
