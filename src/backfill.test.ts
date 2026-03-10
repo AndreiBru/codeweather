@@ -2,6 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { ResolvedConfig } from './config.js'
+import { loadConfig } from './config.js'
+import { rebaseConfigForWorktree } from './backfill.js'
 import { getCommitList } from './history/git.js'
 import { getExistingCommitHashes, getSnapshotDir } from './history/store.js'
 
@@ -16,6 +19,86 @@ afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true })
   }
 })
+
+function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
+  return {
+    cwd: tempDir,
+    src: 'packages/app/src',
+    extensions: ['ts', 'tsx', 'js', 'jsx'],
+    top: 25,
+    json: false,
+    stats: {
+      top: 25,
+      exclude: ['**/fixtures/'],
+      excludeDir: ['node_modules', '.git', '.codeweather'],
+      excludeExt: [],
+      notMatch: undefined,
+      wide: false,
+      noMinGen: true,
+      noCocomo: true,
+      noDuplicates: false,
+      largeLineCount: undefined,
+      largeByteCount: undefined,
+      format: undefined,
+      args: [],
+    },
+    unused: {
+      configFile: undefined,
+      include: [],
+      exclude: [],
+      production: false,
+      strict: false,
+      reporter: undefined,
+      workspace: undefined,
+      tags: [],
+      maxIssues: undefined,
+      includeEntryExports: false,
+      cache: false,
+      args: [],
+    },
+    duplicates: {
+      formats: ['typescript', 'tsx', 'javascript', 'jsx'],
+      minLines: undefined,
+      minTokens: undefined,
+      maxLines: undefined,
+      maxSize: undefined,
+      threshold: undefined,
+      ignore: [],
+      ignorePattern: undefined,
+      reporters: [],
+      mode: 'mild',
+      gitignore: true,
+      skipLocal: false,
+      configFile: undefined,
+      args: [],
+    },
+    cycles: {
+      tsConfig: 'tsconfig.json',
+      configFile: undefined,
+      includeOnly: undefined,
+      exclude: undefined,
+      doNotFollow: undefined,
+      severity: 'error',
+      metrics: false,
+      cache: false,
+      args: [],
+    },
+    graph: {
+      outputDir: 'reports',
+      open: false,
+      exclude: undefined,
+      metrics: false,
+      collapse: undefined,
+      args: [],
+    },
+    history: {
+      enabled: true,
+      dir: '.codeweather',
+      maxSnapshots: undefined,
+    },
+    ...overrides,
+  }
+}
 
 describe('getCommitList', () => {
   it('returns commits from a git repo', async () => {
@@ -91,5 +174,37 @@ describe('getExistingCommitHashes', () => {
 
     const hashes = getExistingCommitHashes(tempDir, historyDir)
     expect(hashes).toEqual(new Set())
+  })
+})
+
+describe('rebaseConfigForWorktree', () => {
+  it('preserves scan settings while switching cwd for historical runs', () => {
+    const config = makeConfig({
+      src: 'apps/web/src',
+      top: 10,
+      stats: {
+        ...makeConfig().stats,
+        args: ['--by-file'],
+      },
+    })
+
+    const worktreeConfig = rebaseConfigForWorktree(config, '/tmp/codeweather-worktree')
+
+    expect(worktreeConfig.cwd).toBe('/tmp/codeweather-worktree')
+    expect(worktreeConfig.json).toBe(true)
+    expect(worktreeConfig.src).toBe('apps/web/src')
+    expect(worktreeConfig.top).toBe(10)
+    expect(worktreeConfig.stats.excludeDir).toEqual(['node_modules', '.git', '.codeweather'])
+    expect(worktreeConfig.stats.args).toEqual(['--by-file'])
+    expect(worktreeConfig.stats).not.toBe(config.stats)
+  })
+})
+
+describe('loadConfig defaults', () => {
+  it('excludes dependency and tool directories when falling back to "."', async () => {
+    const config = await loadConfig(tempDir, {})
+
+    expect(config.src).toBe('.')
+    expect(config.stats.excludeDir).toEqual(['node_modules', '.git', '.codeweather'])
   })
 })

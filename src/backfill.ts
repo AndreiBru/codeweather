@@ -2,7 +2,7 @@ import { existsSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import pc from 'picocolors'
-import { loadConfig, type ResolvedConfig } from './config.js'
+import type { ResolvedConfig } from './config.js'
 import { runChecks } from './runner.js'
 import { getCommitList, type CommitInfo } from './history/git.js'
 import { getExistingCommitHashes, saveSnapshot } from './history/store.js'
@@ -145,6 +145,50 @@ async function installDeps(
   return result.exitCode === 0
 }
 
+export function rebaseConfigForWorktree(
+  config: ResolvedConfig,
+  cwd: string,
+): ResolvedConfig {
+  return {
+    ...config,
+    cwd,
+    json: true,
+    extensions: [...config.extensions],
+    stats: {
+      ...config.stats,
+      exclude: [...config.stats.exclude],
+      excludeDir: [...config.stats.excludeDir],
+      excludeExt: [...config.stats.excludeExt],
+      args: [...config.stats.args],
+    },
+    unused: {
+      ...config.unused,
+      include: [...config.unused.include],
+      exclude: [...config.unused.exclude],
+      tags: [...config.unused.tags],
+      args: [...config.unused.args],
+    },
+    duplicates: {
+      ...config.duplicates,
+      formats: [...config.duplicates.formats],
+      ignore: [...config.duplicates.ignore],
+      reporters: [...config.duplicates.reporters],
+      args: [...config.duplicates.args],
+    },
+    cycles: {
+      ...config.cycles,
+      args: [...config.cycles.args],
+    },
+    graph: {
+      ...config.graph,
+      args: [...config.graph.args],
+    },
+    history: {
+      ...config.history,
+    },
+  }
+}
+
 // ── Main ─────────────────────────────────────────────────────
 
 export async function runBackfill(options: BackfillOptions): Promise<BackfillResult> {
@@ -254,9 +298,7 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
 
       // Step 3: Running checks
       spinner.update(pc.dim('  Running checks…'))
-      const worktreeConfig = await loadConfig(tmpPath, {
-        json: true,
-      })
+      const worktreeConfig = rebaseConfigForWorktree(config, tmpPath)
       const checkResults = await runChecks(worktreeConfig)
       const duration = checkResults.reduce((sum, r) => sum + r.duration, 0)
 
