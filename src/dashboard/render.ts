@@ -3,13 +3,14 @@ import { basename, dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { buildDashboardRows, dashboardMetrics } from './charts.js'
 import { getSnapshotRange } from '../history/summary.js'
-import type { SnapshotSummary } from '../history/types.js'
+import type { SnapshotSummary, SnapshotTreeIndex } from '../history/types.js'
 
 const require = createRequire(import.meta.url)
 
 export function renderDashboardHtml(
   cwd: string,
   snapshots: SnapshotSummary[],
+  trees: Record<string, SnapshotTreeIndex> = {},
 ): string {
   const rows = buildDashboardRows(snapshots)
   const range = getSnapshotRange(snapshots)
@@ -26,6 +27,7 @@ export function renderDashboardHtml(
     generatedAt: new Date().toISOString(),
     range,
     rows,
+    trees,
     metrics: dashboardMetrics,
     controls: rangeControls,
   })
@@ -205,6 +207,203 @@ export function renderDashboardHtml(
       padding: 18px;
     }
 
+    .tree-panel {
+      margin-top: 16px;
+      padding: 18px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .tree-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: start;
+      flex-wrap: wrap;
+    }
+
+    .tree-meta {
+      color: var(--muted);
+      max-width: 42rem;
+      display: grid;
+      gap: 4px;
+      font-size: 14px;
+    }
+
+    .tree-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .tree-shell,
+    .tree-detail {
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 14px;
+    }
+
+    .tree-shell {
+      min-height: 420px;
+      max-height: 68vh;
+      overflow: auto;
+    }
+
+    .tree-root {
+      display: grid;
+      gap: 2px;
+    }
+
+    .tree-node-children {
+      display: grid;
+      gap: 2px;
+    }
+
+    .tree-line {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      padding-left: calc(10px + var(--depth, 0) * 16px);
+    }
+
+    .tree-row {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .tree-row:hover {
+      background: rgba(18, 110, 82, 0.08);
+    }
+
+    .tree-row.selected {
+      background: rgba(18, 110, 82, 0.14);
+      outline: 1px solid rgba(18, 110, 82, 0.24);
+    }
+
+    .tree-toggle,
+    .tree-spacer {
+      width: 18px;
+      height: 18px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 11px;
+      flex: none;
+    }
+
+    .tree-toggle {
+      border: 0;
+      background: rgba(29, 27, 24, 0.06);
+      cursor: pointer;
+    }
+
+    .tree-label {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tree-icon {
+      color: var(--muted);
+      width: 18px;
+      text-align: center;
+      flex: none;
+    }
+
+    .tree-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+
+    .tree-path {
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tree-badges {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: end;
+      gap: 6px;
+    }
+
+    .tree-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 5px 8px;
+      font-size: 12px;
+      background: rgba(29, 27, 24, 0.06);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .tree-badge.issues {
+      background: rgba(177, 74, 24, 0.12);
+      color: #8b4515;
+    }
+
+    .tree-detail {
+      display: grid;
+      gap: 14px;
+      min-height: 260px;
+    }
+
+    .tree-detail h3,
+    .tree-detail h4 {
+      margin: 0;
+      font-family: var(--font);
+      font-size: 1.2rem;
+    }
+
+    .tree-detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 10px;
+    }
+
+    .tree-detail-stat {
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.62);
+    }
+
+    .tree-detail-stat strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 1.2rem;
+      color: var(--text);
+    }
+
+    .tree-detail-list {
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
     .table-wrap {
       overflow: auto;
       border-radius: 14px;
@@ -259,6 +458,7 @@ export function renderDashboardHtml(
       .shell { width: min(100vw - 18px, 1200px); padding-top: 18px; }
       .hero, .panel { border-radius: 18px; }
       .chart-card { min-height: 280px; }
+      .tree-layout { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -290,6 +490,22 @@ export function renderDashboardHtml(
       <div class="grid" id="charts-grid"></div>
     </section>
 
+    <section class="panel tree-panel">
+      <div class="tree-header">
+        <div>
+          <div class="eyebrow">Prototype Explorer</div>
+          <h2>Codebase Tree</h2>
+        </div>
+        <div class="tree-meta" id="tree-meta"></div>
+      </div>
+      <div class="tree-layout">
+        <div class="tree-shell">
+          <div class="tree-root" id="tree-root"></div>
+        </div>
+        <aside class="tree-detail" id="tree-detail"></aside>
+      </div>
+    </section>
+
     <section class="panel table-panel" id="table-panel">
       <h2>Snapshots</h2>
       <div class="table-wrap">
@@ -317,6 +533,9 @@ export function renderDashboardHtml(
     const dashboard = ${payload};
     const charts = [];
     let activeRange = dashboard.controls[0]?.id ?? 'all';
+    let activeNodeId = null;
+    let activeTreeSnapshotId = null;
+    const expandedNodes = new Set();
 
     const formatNumber = (value) => value == null ? '—' : Number(value).toLocaleString('en-US');
     const formatPercent = (value) => value == null ? '—' : Number(value).toFixed(1) + '%';
@@ -327,6 +546,14 @@ export function renderDashboardHtml(
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
+
+    const compactNumber = (value) => {
+      if (value == null) return '—';
+      const abs = Math.abs(Number(value));
+      if (abs >= 1000000) return (value / 1000000).toFixed(1) + 'M';
+      if (abs >= 1000) return (value / 1000).toFixed(1) + 'k';
+      return Number(value).toLocaleString('en-US');
+    };
 
     function getRowsForRange(rangeId) {
       if (rangeId === 'all') return dashboard.rows;
@@ -462,6 +689,158 @@ export function renderDashboardHtml(
       });
     }
 
+    function getTreeSnapshot(rows) {
+      const latest = rows.at(-1);
+      if (!latest) return undefined;
+      const tree = dashboard.trees?.[latest.id];
+      if (!tree) return undefined;
+      return { row: latest, tree };
+    }
+
+    function ensureExpanded(tree) {
+      if (!tree) return;
+      const root = tree.nodes[tree.rootId];
+      if (!root) return;
+      expandedNodes.add(tree.rootId);
+      root.childIds.slice(0, 6).forEach((childId) => {
+        const child = tree.nodes[childId];
+        if (child?.kind === 'dir') {
+          expandedNodes.add(childId);
+        }
+      });
+    }
+
+    function renderTreeMeta(treeSnapshot) {
+      const meta = document.getElementById('tree-meta');
+      if (!treeSnapshot) {
+        meta.innerHTML = 'No tree data found for the selected range.';
+        return;
+      }
+
+      meta.innerHTML = [
+        'Showing the latest snapshot in the active range: ' + escapeHtml(treeSnapshot.row.label),
+        'Commit ' + escapeHtml(treeSnapshot.row.commit + (treeSnapshot.row.dirty ? '*' : '')) + ' · ' +
+          escapeHtml(treeSnapshot.tree.rootId) + ' root · ' +
+          treeSnapshot.row.tree.nodeCount.toLocaleString('en-US') + ' nodes',
+      ].map((line) => '<div>' + line + '</div>').join('');
+    }
+
+    function renderTreeNode(tree, nodeId, depth) {
+      const node = tree.nodes[nodeId];
+      if (!node) return '';
+
+      const escapedNodeId = escapeHtml(nodeId);
+      const isDir = node.kind === 'dir';
+      const isExpanded = expandedNodes.has(nodeId);
+      const isSelected = activeNodeId === nodeId;
+      const issueText = node.issues.total > 0 ? compactNumber(node.issues.total) + ' issues' : 'clean';
+      const statText = isDir
+        ? compactNumber(node.stats.files) + ' files'
+        : compactNumber(node.stats.lines) + ' lines';
+      const children = isDir && isExpanded
+        ? '<div class="tree-node-children">' + node.childIds.map((childId) => renderTreeNode(tree, childId, depth + 1)).join('') + '</div>'
+        : '';
+
+      return \`
+        <div class="tree-node" data-node="\${escapedNodeId}">
+          <div class="tree-line" style="--depth: \${depth}">
+            \${isDir
+              ? '<button type="button" class="tree-toggle" data-toggle="' + escapedNodeId + '">' + (isExpanded ? '&#9662;' : '&#9656;') + '</button>'
+              : '<span class="tree-spacer"></span>'}
+            <button type="button" class="tree-row tree-select \${isSelected ? 'selected' : ''}" data-select-node="\${escapedNodeId}">
+              <span class="tree-label">
+                <span class="tree-icon">\${isDir ? '&#128193;' : '&#128196;'}</span>
+                <span>
+                  <span class="tree-name">\${escapeHtml(node.name || node.path)}</span>
+                  <div class="tree-path">\${escapeHtml(node.path)}</div>
+                </span>
+              </span>
+              <span class="tree-badges">
+                <span class="tree-badge \${node.issues.total > 0 ? 'issues' : ''}">\${escapeHtml(issueText)}</span>
+                <span class="tree-badge">\${escapeHtml(statText)}</span>
+              </span>
+            </button>
+          </div>
+          \${children}
+        </div>
+      \`;
+    }
+
+    function renderTreeDetail(treeSnapshot) {
+      const detail = document.getElementById('tree-detail');
+      if (!treeSnapshot) {
+        detail.innerHTML = '<article class="mini-card">No tree data available yet for the selected range.</article>';
+        return;
+      }
+
+      const tree = treeSnapshot.tree;
+      const node = tree.nodes[activeNodeId] ?? tree.nodes[tree.rootId];
+      if (!node) {
+        detail.innerHTML = '<article class="mini-card">Tree root is missing.</article>';
+        return;
+      }
+
+      detail.innerHTML = \`
+        <div>
+          <div class="eyebrow">\${node.kind === 'dir' ? 'Folder' : 'File'}</div>
+          <h3>\${escapeHtml(node.name || node.path)}</h3>
+          <div class="tree-path">\${escapeHtml(node.path)}</div>
+        </div>
+        <div class="tree-detail-grid">
+          <article class="tree-detail-stat">
+            <div class="eyebrow">Files</div>
+            <strong>\${formatNumber(node.stats.files)}</strong>
+          </article>
+          <article class="tree-detail-stat">
+            <div class="eyebrow">Lines</div>
+            <strong>\${formatNumber(node.stats.lines)}</strong>
+          </article>
+          <article class="tree-detail-stat">
+            <div class="eyebrow">Code</div>
+            <strong>\${formatNumber(node.stats.code)}</strong>
+          </article>
+          <article class="tree-detail-stat">
+            <div class="eyebrow">Complexity</div>
+            <strong>\${formatNumber(node.stats.complexity)}</strong>
+          </article>
+        </div>
+        <div>
+          <h4>Issue Rollup</h4>
+          <div class="tree-detail-list">
+            <div>Total: \${formatNumber(node.issues.total)}</div>
+            <div>Unused: \${formatNumber(node.issues.unused)}</div>
+            <div>Duplication: \${formatNumber(node.issues.duplication)}</div>
+            <div>Cycles: \${formatNumber(node.issues.cycles)}</div>
+            <div>Children: \${formatNumber(node.childIds.length)}</div>
+          </div>
+        </div>
+      \`;
+    }
+
+    function renderTree(rows) {
+      const treeRoot = document.getElementById('tree-root');
+      const treeSnapshot = getTreeSnapshot(rows);
+      renderTreeMeta(treeSnapshot);
+
+      if (!treeSnapshot) {
+        activeTreeSnapshotId = null;
+        activeNodeId = null;
+        treeRoot.innerHTML = '<article class="mini-card">No tree data found for the latest snapshot in this range.</article>';
+        renderTreeDetail(undefined);
+        return;
+      }
+
+      const tree = treeSnapshot.tree;
+      if (activeTreeSnapshotId !== treeSnapshot.row.id) {
+        activeTreeSnapshotId = treeSnapshot.row.id;
+        activeNodeId = tree.rootId;
+      }
+
+      ensureExpanded(tree);
+      treeRoot.innerHTML = renderTreeNode(tree, tree.rootId, 0);
+      renderTreeDetail(treeSnapshot);
+    }
+
     function renderTable(rows) {
       const body = document.getElementById('history-body');
       body.innerHTML = rows.slice().reverse().map((row) => \`
@@ -496,6 +875,7 @@ export function renderDashboardHtml(
       renderHero(rows);
       renderSummaryCards(rows);
       renderCharts(rows);
+      renderTree(rows);
       renderTable(rows);
     }
 
@@ -516,6 +896,23 @@ export function renderDashboardHtml(
       const panel = document.getElementById('table-panel');
       const hidden = panel.classList.toggle('hidden');
       document.getElementById('toggle-table').textContent = hidden ? 'Show Table' : 'Hide Table';
+    });
+
+    document.getElementById('tree-root').addEventListener('click', (event) => {
+      const toggle = event.target.closest('[data-toggle]');
+      if (toggle) {
+        const nodeId = toggle.dataset.toggle;
+        if (expandedNodes.has(nodeId)) expandedNodes.delete(nodeId);
+        else expandedNodes.add(nodeId);
+        render(activeRange);
+        return;
+      }
+
+      const button = event.target.closest('[data-select-node]');
+      if (!button) return;
+      activeNodeId = button.dataset.selectNode;
+      const rows = getRowsForRange(activeRange);
+      renderTree(rows);
     });
 
     render(activeRange);

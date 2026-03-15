@@ -17,7 +17,7 @@ import { cyclesCheck } from './checks/cycles.js'
 import { createGraphCheck } from './checks/graph.js'
 import { renderDashboardHtml } from './dashboard/render.js'
 import { renderHistoryTable } from './history/render.js'
-import { getHistoryDir, loadSnapshots } from './history/store.js'
+import { getHistoryDir, loadSnapshotBundle, loadSnapshots } from './history/store.js'
 import { openPath } from './utils/open.js'
 
 const globalArgs = {
@@ -221,7 +221,13 @@ const dashboardCommand = defineCommand({
       ? resolve(config.cwd, args.output as string)
       : resolve(historyDir, 'dashboard.html')
     mkdirSync(dirname(outputPath), { recursive: true })
-    const html = renderDashboardHtml(config.cwd, snapshots)
+    const trees = Object.fromEntries(
+      snapshots.flatMap((snapshot) => {
+        const bundle = loadSnapshotBundle(config.cwd, config.history.dir, snapshot.id)
+        return bundle ? [[snapshot.id, bundle.tree] as const] : []
+      }),
+    )
+    const html = renderDashboardHtml(config.cwd, snapshots, trees)
     writeFileSync(outputPath, html)
 
     if (config.json) {

@@ -151,13 +151,38 @@ describe('history rendering', () => {
 })
 
 describe('dashboard rendering', () => {
-  it('renders self-contained html with Chart.js charts and controls', () => {
-    const html = renderDashboardHtml('/tmp/project-name', snapshots)
+  it('renders self-contained html with Chart.js charts, controls, and tree prototype', () => {
+    const html = renderDashboardHtml('/tmp/project-name', snapshots, {
+      [snapshots[1].id]: {
+        rootId: 'src',
+        nodes: {
+          src: {
+            path: 'src',
+            name: 'src',
+            kind: 'dir',
+            childIds: ['src/app.ts'],
+            stats: { files: 1, lines: 120, code: 90, complexity: 24 },
+            issues: { total: 3, unused: 2, duplication: 1, cycles: 0 },
+          },
+          'src/app.ts': {
+            path: 'src/app.ts',
+            name: 'app.ts',
+            kind: 'file',
+            childIds: [],
+            stats: { files: 1, lines: 120, code: 90, complexity: 24 },
+            issues: { total: 3, unused: 2, duplication: 1, cycles: 0 },
+          },
+        },
+      },
+    })
 
     expect(html).toContain('<!doctype html>')
     expect(html).toContain('project-name')
     expect(html).toContain('new Chart')
     expect(html).toContain('range-controls')
     expect(html).toContain('Hide Table')
+    expect(html).toContain('Prototype Explorer')
+    expect(html).toContain('Codebase Tree')
+    expect(html).toContain('app.ts')
   })
 })
