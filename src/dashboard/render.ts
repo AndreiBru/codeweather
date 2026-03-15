@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
-import { buildDashboardRows, dashboardMetrics } from './charts.js'
+import { buildDashboardRows, computeHotspots, computeDirectoryHotspots, dashboardMetrics } from './charts.js'
 import { getSnapshotRange } from '../history/summary.js'
 import type { SnapshotSummary, SnapshotTreeIndex } from '../history/types.js'
 
@@ -22,6 +22,11 @@ export function renderDashboardHtml(
     ...(rows.length > 25 ? [{ id: '25', label: 'Last 25', count: 25 }] : []),
   ]
 
+  const latestRow = rows.at(-1)
+  const latestTree = latestRow ? trees[latestRow.id] : undefined
+  const fileHotspots = latestTree ? computeHotspots(latestTree, 10) : []
+  const dirHotspots = latestTree ? computeDirectoryHotspots(latestTree, 5) : []
+
   const payload = serializeForScript({
     projectName: basename(cwd),
     generatedAt: new Date().toISOString(),
@@ -30,6 +35,8 @@ export function renderDashboardHtml(
     trees,
     metrics: dashboardMetrics,
     controls: rangeControls,
+    fileHotspots,
+    dirHotspots,
   })
 
   return `<!doctype html>
@@ -37,355 +44,562 @@ export function renderDashboardHtml(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Codeweather Dashboard</title>
+  <title>Codeweather &mdash; ${escapeHtml(basename(cwd))}</title>
   <style>
     :root {
-      --bg: #f4efe6;
-      --panel: rgba(255, 251, 245, 0.82);
-      --panel-strong: #fffaf2;
-      --text: #1d1b18;
-      --muted: #665f56;
-      --border: rgba(29, 27, 24, 0.12);
-      --accent: #126e52;
-      --shadow: 0 18px 40px rgba(45, 32, 17, 0.08);
-      --radius: 22px;
-      --font: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
-      --font-ui: "Avenir Next", "Segoe UI", sans-serif;
+      --bg: #f5f1ea;
+      --surface: rgba(255, 252, 247, 0.88);
+      --surface-solid: #fffcf7;
+      --surface-raised: #ffffff;
+      --text: #1a1814;
+      --text-secondary: #6b6560;
+      --text-tertiary: #9a938b;
+      --border: rgba(26, 24, 20, 0.10);
+      --border-strong: rgba(26, 24, 20, 0.18);
+      --green: #0d6b4e;
+      --green-soft: rgba(13, 107, 78, 0.08);
+      --green-medium: rgba(13, 107, 78, 0.14);
+      --amber: #b8590c;
+      --amber-soft: rgba(184, 89, 12, 0.08);
+      --red: #a12844;
+      --red-soft: rgba(161, 40, 68, 0.08);
+      --blue: #1a56b8;
+      --blue-soft: rgba(26, 86, 184, 0.08);
+      --shadow-sm: 0 1px 3px rgba(26, 24, 20, 0.06);
+      --shadow-md: 0 4px 16px rgba(26, 24, 20, 0.06);
+      --shadow-lg: 0 12px 40px rgba(26, 24, 20, 0.08);
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 20px;
+      --font: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      --font-mono: "SF Mono", "Cascadia Code", "Consolas", monospace;
     }
 
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; }
 
     body {
-      margin: 0;
       min-height: 100vh;
-      background:
-        radial-gradient(circle at top left, rgba(18, 110, 82, 0.14), transparent 24rem),
-        radial-gradient(circle at top right, rgba(177, 74, 24, 0.12), transparent 24rem),
-        linear-gradient(180deg, #fbf7ef 0%, var(--bg) 100%);
+      background: var(--bg);
       color: var(--text);
-      font-family: var(--font-ui);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
     }
 
     .shell {
-      width: min(1200px, calc(100vw - 32px));
+      max-width: 1120px;
       margin: 0 auto;
-      padding: 28px 0 56px;
+      padding: 20px 24px 64px;
     }
 
-    .hero,
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(18px);
-    }
-
-    .hero {
-      padding: 28px;
-      display: grid;
-      gap: 20px;
-    }
-
-    .hero-top {
+    /* ── Header ── */
+    .header {
       display: flex;
+      align-items: center;
       justify-content: space-between;
       gap: 16px;
-      align-items: start;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
       flex-wrap: wrap;
     }
 
-    .eyebrow {
-      font-size: 12px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 10px;
-    }
-
-    h1 {
-      margin: 0;
-      font-family: var(--font);
-      font-size: clamp(2.2rem, 4vw, 3.8rem);
-      line-height: 0.95;
-      font-weight: 700;
-    }
-
-    .hero-meta {
-      display: grid;
-      gap: 6px;
-      color: var(--muted);
-      max-width: 34rem;
-    }
-
-    .hero-stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    .header-left {
+      display: flex;
+      align-items: center;
       gap: 12px;
     }
 
-    .stat-card,
-    .mini-card {
-      background: var(--panel-strong);
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 16px;
+    .header h1 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
     }
 
-    .stat-card strong,
-    .mini-card strong {
-      display: block;
-      font-size: 1.5rem;
-      margin-top: 8px;
+    .header-badge {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--green);
+      background: var(--green-soft);
+      padding: 3px 8px;
+      border-radius: 4px;
     }
 
+    .header-meta {
+      display: flex;
+      gap: 16px;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+
+    .header-meta span { white-space: nowrap; }
+
+    /* ── Controls ── */
     .controls {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 16px;
-      margin: 22px 0 16px;
+      gap: 12px;
+      margin-bottom: 20px;
       flex-wrap: wrap;
     }
 
-    .button-row {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
+    .seg-group {
+      display: inline-flex;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
     }
 
-    button {
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.74);
-      color: var(--text);
-      border-radius: 999px;
-      padding: 10px 16px;
+    .seg-group button {
+      padding: 6px 14px;
       font: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      border: 0;
+      background: var(--surface-solid);
+      color: var(--text-secondary);
       cursor: pointer;
-      transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+      transition: background 100ms, color 100ms;
     }
 
-    button:hover { transform: translateY(-1px); }
-    button.active {
-      background: var(--text);
-      color: white;
-      border-color: var(--text);
+    .seg-group button:not(:last-child) {
+      border-right: 1px solid var(--border);
     }
 
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 14px;
+    .seg-group button:hover { background: var(--green-soft); color: var(--text); }
+    .seg-group button.active { background: var(--text); color: #fff; }
+
+    .controls-right {
+      display: flex;
+      gap: 8px;
     }
 
-    .chart-card {
-      padding: 18px;
-      min-height: 320px;
-    }
-
-    .chart-card h2,
-    .table-panel h2 {
-      margin: 0 0 14px;
-      font-family: var(--font);
-      font-size: 1.5rem;
-    }
-
-    .chart-card canvas {
-      width: 100% !important;
-      height: 230px !important;
-    }
-
-    .latest-summary {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 12px;
-      margin-bottom: 18px;
-    }
-
-    .table-panel {
-      margin-top: 16px;
-      padding: 18px;
-    }
-
-    .insights-panel {
-      margin-top: 16px;
-      padding: 18px;
-      display: grid;
-      gap: 18px;
-    }
-
-    .insight-summary {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 12px;
-    }
-
-    .insight-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 14px;
-    }
-
-    .insight-card {
-      background: var(--panel-strong);
+    .btn-ghost {
+      padding: 6px 12px;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 500;
       border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 16px;
-      display: grid;
-      gap: 12px;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
     }
 
-    .insight-list {
-      display: grid;
-      gap: 10px;
+    .btn-ghost:hover { background: var(--surface); color: var(--text); }
+
+    /* ── Cards & Panels ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+      backdrop-filter: blur(12px);
     }
 
-    .insight-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: start;
-      gap: 12px;
-      padding: 12px;
-      border-radius: 14px;
-      background: rgba(18, 110, 82, 0.06);
-    }
-
-    .insight-row strong {
-      white-space: nowrap;
-      font-size: 1rem;
-    }
-
-    .insight-path {
+    .section-label {
+      font-size: 11px;
       font-weight: 600;
-      word-break: break-word;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-tertiary);
+      margin-bottom: 12px;
     }
 
-    .insight-meta {
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.4;
-    }
+    .section-gap { margin-bottom: 16px; }
 
-    .insight-empty {
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    .tree-panel {
-      margin-top: 16px;
-      padding: 18px;
+    /* ── Health Score ── */
+    .health-row {
       display: grid;
-      gap: 18px;
+      grid-template-columns: auto 1fr;
+      gap: 24px;
+      padding: 24px;
+      align-items: center;
     }
 
-    .tree-header {
+    .health-ring {
+      position: relative;
+      width: 140px;
+      height: 140px;
+      flex: none;
+    }
+
+    .health-ring svg {
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+    }
+
+    .health-ring-track {
+      fill: none;
+      stroke: var(--border);
+      stroke-width: 10;
+    }
+
+    .health-ring-value {
+      fill: none;
+      stroke-width: 10;
+      stroke-linecap: round;
+      transition: stroke-dasharray 600ms ease;
+    }
+
+    .health-ring-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .health-number {
+      font-size: 36px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      line-height: 1;
+    }
+
+    .health-trend {
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    .health-trend.up { color: var(--green); }
+    .health-trend.down { color: var(--red); }
+    .health-trend.flat { color: var(--text-tertiary); }
+
+    .health-caption {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-top: 4px;
+    }
+
+    .health-detail {
+      display: grid;
+      gap: 12px;
+    }
+
+    .sub-score {
+      display: grid;
+      grid-template-columns: 100px 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .sub-score-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    .sub-score-bar-track {
+      height: 6px;
+      border-radius: 3px;
+      background: var(--border);
+      overflow: hidden;
+    }
+
+    .sub-score-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 500ms ease;
+    }
+
+    .sub-score-value {
+      font-size: 13px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      min-width: 28px;
+      text-align: right;
+    }
+
+    .health-empty {
+      padding: 24px;
+      color: var(--text-tertiary);
+      text-align: center;
+    }
+
+    /* ── Hotspots ── */
+    .hotspots-panel { padding: 20px; }
+
+    .hotspots-tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+
+    .hotspots-tab {
+      padding: 8px 16px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      background: none;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      transition: color 100ms, border-color 100ms;
+    }
+
+    .hotspots-tab:hover { color: var(--text); }
+
+    .hotspots-tab.active {
+      color: var(--text);
+      border-bottom-color: var(--green);
+    }
+
+    .hotspot-list { display: grid; gap: 4px; }
+
+    .hotspot-row {
+      display: grid;
+      grid-template-columns: 36px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      transition: background 100ms;
+    }
+
+    .hotspot-row:hover { background: var(--green-soft); }
+
+    .hotspot-score-badge {
+      width: 36px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      border-radius: 6px;
+    }
+
+    .hotspot-score-badge.high {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .hotspot-score-badge.medium {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .hotspot-score-badge.low {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .hotspot-info {
+      min-width: 0;
+    }
+
+    .hotspot-path {
+      font-size: 13px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hotspot-meta {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      margin-top: 2px;
+    }
+
+    .hotspot-signals {
+      display: flex;
+      gap: 4px;
+    }
+
+    .signal-dot {
+      width: 8px;
+      height: 20px;
+      border-radius: 2px;
+      opacity: 0.2;
+      transition: opacity 100ms;
+    }
+
+    .signal-dot.active { opacity: 1; }
+
+    .signal-dot.complexity { background: var(--amber); }
+    .signal-dot.size { background: var(--text-secondary); }
+    .signal-dot.issues { background: var(--red); }
+    .signal-dot.instability { background: var(--blue); }
+
+    .hotspot-empty {
+      padding: 24px;
+      text-align: center;
+      color: var(--text-tertiary);
+      font-size: 13px;
+    }
+
+    /* ── Trends ── */
+    .trends-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 12px;
+    }
+
+    .trend-card {
+      padding: 16px;
+    }
+
+    .trend-header {
       display: flex;
       justify-content: space-between;
-      gap: 14px;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+
+    .trend-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary);
+    }
+
+    .trend-value {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .trend-delta {
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 6px;
+    }
+
+    .trend-delta.positive { color: var(--red); }
+    .trend-delta.negative { color: var(--green); }
+    .trend-delta.neutral { color: var(--text-tertiary); }
+    .trend-delta.positive-good { color: var(--green); }
+    .trend-delta.negative-bad { color: var(--red); }
+
+    .trend-chart {
+      height: 80px;
+      margin-top: 4px;
+    }
+
+    .trend-chart canvas {
+      width: 100% !important;
+      height: 80px !important;
+    }
+
+    /* ── Tree ── */
+    .tree-panel { padding: 20px; }
+
+    .tree-panel-header {
+      display: flex;
+      justify-content: space-between;
       align-items: start;
+      gap: 14px;
+      margin-bottom: 16px;
       flex-wrap: wrap;
     }
 
-    .tree-meta {
-      color: var(--muted);
-      max-width: 42rem;
-      display: grid;
-      gap: 4px;
-      font-size: 14px;
+    .tree-meta-line {
+      color: var(--text-tertiary);
+      font-size: 12px;
     }
 
     .tree-layout {
       display: grid;
-      grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr);
-      gap: 16px;
+      grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.85fr);
+      gap: 12px;
       align-items: start;
     }
 
     .tree-shell,
     .tree-detail {
-      background: var(--panel-strong);
+      background: var(--surface-solid);
       border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 14px;
+      border-radius: var(--radius-md);
     }
 
     .tree-shell {
-      min-height: 420px;
-      max-height: 68vh;
+      min-height: 360px;
+      max-height: 56vh;
       overflow: auto;
+      padding: 8px;
     }
 
-    .tree-root {
-      display: grid;
-      gap: 2px;
-    }
-
-    .tree-node-children {
-      display: grid;
-      gap: 2px;
-    }
+    .tree-root { display: grid; gap: 1px; }
+    .tree-node-children { display: grid; gap: 1px; }
 
     .tree-line {
       display: grid;
-      grid-template-columns: 18px minmax(0, 1fr);
-      gap: 8px;
+      grid-template-columns: 16px minmax(0, 1fr);
+      gap: 6px;
       align-items: center;
-      padding-left: calc(10px + var(--depth, 0) * 16px);
+      padding-left: calc(8px + var(--depth, 0) * 14px);
     }
 
     .tree-row {
       width: 100%;
       display: flex;
       justify-content: space-between;
-      gap: 10px;
+      gap: 8px;
       align-items: center;
-      padding: 8px 10px;
+      padding: 5px 8px;
       border: 0;
-      border-radius: 12px;
+      border-radius: var(--radius-sm);
       background: transparent;
       color: inherit;
       text-align: left;
       cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      transition: background 80ms;
     }
 
-    .tree-row:hover {
-      background: rgba(18, 110, 82, 0.08);
-    }
-
-    .tree-row.selected {
-      background: rgba(18, 110, 82, 0.14);
-      outline: 1px solid rgba(18, 110, 82, 0.24);
-    }
+    .tree-row:hover { background: var(--green-soft); }
+    .tree-row.selected { background: var(--green-medium); }
 
     .tree-toggle,
     .tree-spacer {
-      width: 18px;
-      height: 18px;
+      width: 16px;
+      height: 16px;
       display: inline-grid;
       place-items: center;
-      border-radius: 999px;
-      color: var(--muted);
-      font-size: 11px;
+      font-size: 10px;
+      color: var(--text-tertiary);
       flex: none;
     }
 
     .tree-toggle {
       border: 0;
-      background: rgba(29, 27, 24, 0.06);
+      background: none;
       cursor: pointer;
+      border-radius: 3px;
     }
+
+    .tree-toggle:hover { background: var(--border); }
 
     .tree-label {
       min-width: 0;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
 
     .tree-icon {
-      color: var(--muted);
-      width: 18px;
+      color: var(--text-tertiary);
+      font-size: 13px;
+      width: 16px;
       text-align: center;
       flex: none;
     }
@@ -394,182 +608,213 @@ export function renderDashboardHtml(
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      font-weight: 600;
-    }
-
-    .tree-path {
-      color: var(--muted);
-      font-size: 12px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      font-weight: 500;
     }
 
     .tree-badges {
       display: flex;
-      flex-wrap: wrap;
-      justify-content: end;
-      gap: 6px;
+      gap: 4px;
+      flex: none;
     }
 
     .tree-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      border-radius: 999px;
-      padding: 5px 8px;
-      font-size: 12px;
-      background: rgba(29, 27, 24, 0.06);
-      color: var(--muted);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(26, 24, 20, 0.05);
+      color: var(--text-tertiary);
       white-space: nowrap;
     }
 
     .tree-badge.issues {
-      background: rgba(177, 74, 24, 0.12);
-      color: #8b4515;
+      background: var(--amber-soft);
+      color: var(--amber);
+      font-weight: 600;
     }
 
     .tree-detail {
+      padding: 16px;
       display: grid;
-      gap: 14px;
-      min-height: 260px;
+      gap: 16px;
+      min-height: 200px;
     }
 
-    .tree-detail h3,
-    .tree-detail h4 {
-      margin: 0;
-      font-family: var(--font);
-      font-size: 1.2rem;
+    .tree-detail h3 {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .tree-detail-section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-tertiary);
+      margin-bottom: 8px;
     }
 
     .tree-detail-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
     }
 
     .tree-detail-stat {
-      padding: 12px;
-      border-radius: 14px;
+      padding: 10px;
+      border-radius: var(--radius-sm);
       border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.62);
+      background: var(--surface);
     }
 
-    .tree-detail-stat strong {
-      display: block;
-      margin-top: 6px;
-      font-size: 1.2rem;
-      color: var(--text);
+    .tree-detail-stat-label {
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
+
+    .tree-detail-stat-value {
+      font-size: 16px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      margin-top: 2px;
     }
 
     .tree-detail-list {
       display: grid;
-      gap: 8px;
-      color: var(--muted);
-      font-size: 14px;
+      gap: 4px;
+      font-size: 13px;
+      color: var(--text-secondary);
     }
+
+    .tree-detail-list-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tree-detail-list-row:last-child { border-bottom: 0; }
+
+    /* ── Table ── */
+    .table-panel { padding: 20px; }
 
     .table-wrap {
       overflow: auto;
-      border-radius: 14px;
+      border-radius: var(--radius-md);
       border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.72);
     }
 
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 860px;
-      font-size: 14px;
+      min-width: 720px;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
     }
 
     th, td {
-      padding: 12px 14px;
+      padding: 8px 12px;
       text-align: left;
-      border-bottom: 1px solid rgba(29, 27, 24, 0.08);
-      white-space: nowrap;
+      border-bottom: 1px solid var(--border);
     }
 
     th {
       font-size: 11px;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.14em;
-      color: var(--muted);
-      background: rgba(255, 250, 242, 0.9);
+      letter-spacing: 0.06em;
+      color: var(--text-tertiary);
+      background: var(--surface-solid);
+      position: sticky;
+      top: 0;
     }
 
     tr:last-child td { border-bottom: 0; }
+    tr:hover td { background: var(--green-soft); }
 
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: rgba(29, 27, 24, 0.06);
+    .commit-badge {
+      font-family: var(--font-mono);
       font-size: 12px;
+      background: rgba(26, 24, 20, 0.05);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .status-dots {
+      display: inline-flex;
+      gap: 3px;
+      align-items: center;
     }
 
     .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: var(--accent);
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
     }
+
+    .status-dot.pass { background: var(--green); }
+    .status-dot.warn { background: var(--amber); }
+    .status-dot.fail { background: var(--red); }
+    .status-dot.skip { background: var(--border-strong); }
 
     .hidden { display: none; }
 
     @media (max-width: 700px) {
-      .shell { width: min(100vw - 18px, 1200px); padding-top: 18px; }
-      .hero, .panel { border-radius: 18px; }
-      .chart-card { min-height: 280px; }
+      .shell { padding: 12px 12px 40px; }
+      .health-row { grid-template-columns: 1fr; justify-items: center; }
       .tree-layout { grid-template-columns: 1fr; }
+      .trends-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <main class="shell">
-    <section class="hero">
-      <div class="hero-top">
-        <div>
-          <div class="eyebrow">Trending Dashboard</div>
-          <h1>${escapeHtml(basename(cwd))}</h1>
-        </div>
-        <div class="hero-meta">
-          <div id="range-label"></div>
-          <div id="generated-label"></div>
-        </div>
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <h1>${escapeHtml(basename(cwd))}</h1>
+        <span class="header-badge">Codeweather</span>
       </div>
-      <div class="hero-stats" id="hero-stats"></div>
-    </section>
+      <div class="header-meta" id="header-meta"></div>
+    </header>
 
+    <!-- Controls -->
     <div class="controls">
-      <div class="button-row" id="range-controls"></div>
-      <div class="button-row">
-        <button id="toggle-table" type="button">Hide Table</button>
+      <div class="seg-group" id="range-controls"></div>
+      <div class="controls-right">
+        <button class="btn-ghost" id="toggle-tree" type="button">Hide Tree</button>
+        <button class="btn-ghost" id="toggle-table" type="button">Hide Table</button>
       </div>
     </div>
 
-    <section class="panel chart-card">
-      <div class="latest-summary" id="latest-summary"></div>
-      <div class="grid" id="charts-grid"></div>
+    <!-- Health Score -->
+    <section class="card section-gap" id="health-section">
+      <div id="health-content"></div>
     </section>
 
-    <section class="panel insights-panel">
-      <div>
-        <div class="eyebrow">Dependency-Cruiser</div>
-        <h2>Dependency Instability</h2>
+    <!-- Hotspots -->
+    <section class="card section-gap hotspots-panel" id="hotspots-section">
+      <div class="section-label">Hotspots</div>
+      <div class="hotspots-tabs" id="hotspot-tabs">
+        <button type="button" class="hotspots-tab active" data-hotspot-tab="files">Files</button>
+        <button type="button" class="hotspots-tab" data-hotspot-tab="dirs">Directories</button>
       </div>
-      <div id="instability-panel"></div>
+      <div id="hotspot-content"></div>
     </section>
 
-    <section class="panel tree-panel">
-      <div class="tree-header">
+    <!-- Trends -->
+    <section class="section-gap">
+      <div class="section-label">Trends</div>
+      <div class="trends-grid" id="trends-grid"></div>
+    </section>
+
+    <!-- Tree -->
+    <section class="card section-gap tree-panel" id="tree-section">
+      <div class="tree-panel-header">
         <div>
-          <div class="eyebrow">Prototype Explorer</div>
-          <h2>Codebase Tree</h2>
+          <div class="section-label" style="margin-bottom:4px">Codebase Tree</div>
+          <div class="tree-meta-line" id="tree-meta"></div>
         </div>
-        <div class="tree-meta" id="tree-meta"></div>
       </div>
       <div class="tree-layout">
         <div class="tree-shell">
@@ -579,19 +824,21 @@ export function renderDashboardHtml(
       </div>
     </section>
 
-    <section class="panel table-panel" id="table-panel">
-      <h2>Snapshots</h2>
+    <!-- Table -->
+    <section class="card table-panel" id="table-panel">
+      <div class="section-label" style="margin-bottom:12px">Snapshot History</div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Timestamp</th>
+              <th>Date</th>
               <th>Commit</th>
+              <th>Health</th>
               <th>Status</th>
               <th>Lines</th>
               <th>Complexity</th>
               <th>Unused</th>
-              <th>Duplication</th>
+              <th>Dup %</th>
               <th>Cycles</th>
             </tr>
           </thead>
@@ -606,121 +853,208 @@ export function renderDashboardHtml(
     const dashboard = ${payload};
     const charts = [];
     let activeRange = dashboard.controls[0]?.id ?? 'all';
+    let activeHotspotTab = 'files';
     let activeNodeId = null;
     let activeTreeSnapshotId = null;
     const expandedNodes = new Set();
 
-    const formatNumber = (value) => value == null ? '—' : Number(value).toLocaleString('en-US');
-    const formatPercent = (value) => value == null ? '—' : Number(value).toFixed(1) + '%';
-    const formatInstability = (value) => value == null ? '—' : (Number(value) * 100).toFixed(1) + '%';
-    const formatMetric = (metric, value) => metric.kind === 'percent' ? formatPercent(value) : formatNumber(value);
-    const escapeHtml = (value) => value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
-
-    const compactNumber = (value) => {
-      if (value == null) return '—';
-      const abs = Math.abs(Number(value));
-      if (abs >= 1000000) return (value / 1000000).toFixed(1) + 'M';
-      if (abs >= 1000) return (value / 1000).toFixed(1) + 'k';
-      return Number(value).toLocaleString('en-US');
+    const fmt = (v) => v == null ? '\\u2014' : Number(v).toLocaleString('en-US');
+    const fmtPct = (v) => v == null ? '\\u2014' : Number(v).toFixed(1) + '%';
+    const fmtMetric = (m, v) => m.kind === 'percent' ? fmtPct(v) : fmt(v);
+    const esc = (v) => String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const compact = (v) => {
+      if (v == null) return '\\u2014';
+      const n = Number(v);
+      if (Math.abs(n) >= 1e6) return (n/1e6).toFixed(1)+'M';
+      if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(1)+'k';
+      return n.toLocaleString('en-US');
     };
 
-    function getRowsForRange(rangeId) {
+    function getRows(rangeId) {
       if (rangeId === 'all') return dashboard.rows;
-      const count = Number(rangeId);
-      return dashboard.rows.slice(-count);
+      return dashboard.rows.slice(-Number(rangeId));
     }
 
     function destroyCharts() {
-      while (charts.length) {
-        charts.pop().destroy();
-      }
+      while (charts.length) charts.pop().destroy();
+    }
+
+    function scoreColor(score) {
+      if (score >= 80) return 'var(--green)';
+      if (score >= 50) return 'var(--amber)';
+      return 'var(--red)';
+    }
+
+    function scoreTier(score) {
+      if (score >= 80) return 'low';
+      if (score >= 50) return 'medium';
+      return 'high';
     }
 
     function metricDelta(rows, key) {
-      if (rows.length < 2) return '—';
-      const current = rows.at(-1)?.metrics?.[key];
-      const previous = rows.at(-2)?.metrics?.[key];
-      if (current == null || previous == null) return '—';
-      const delta = Number((current - previous).toFixed(key === 'duplication' ? 1 : 0));
+      if (rows.length < 2) return null;
+      const c = rows.at(-1)?.metrics?.[key];
+      const p = rows.at(-2)?.metrics?.[key];
+      if (c == null || p == null) return null;
+      return Number((c - p).toFixed(key === 'duplication' ? 1 : 0));
+    }
+
+    function deltaClass(key, delta) {
+      if (delta == null || delta === 0) return 'neutral';
+      if (key === 'lines') return delta > 0 ? 'neutral' : 'neutral';
+      return delta > 0 ? 'positive' : 'negative';
+    }
+
+    function deltaText(key, delta) {
+      if (delta == null) return '';
       if (delta === 0) return '=';
-      if (key === 'duplication') return (delta > 0 ? '+' : '') + delta.toFixed(1) + '%';
-      return (delta > 0 ? '+' : '') + delta.toLocaleString('en-US');
+      const sign = delta > 0 ? '+' : '';
+      if (key === 'duplication') return sign + delta.toFixed(1) + '%';
+      return sign + delta.toLocaleString('en-US');
     }
 
-    function renderHero(rows) {
-      const statsEl = document.getElementById('hero-stats');
+    /* ── Header ── */
+    function renderHeader(rows) {
+      const el = document.getElementById('header-meta');
       const latest = rows.at(-1);
-      const totals = [
-        ['Snapshots', rows.length],
-        ['Latest Commit', latest ? latest.commit + (latest.dirty ? '*' : '') : '—'],
-        ['Range Start', rows[0]?.label ?? '—'],
-        ['Range End', latest?.label ?? '—'],
-      ];
-
-      statsEl.innerHTML = totals.map(([label, value]) => \`
-        <article class="stat-card">
-          <div class="eyebrow">\${label}</div>
-          <strong>\${escapeHtml(String(value))}</strong>
-        </article>
-      \`).join('');
-
-      document.getElementById('range-label').textContent =
-        dashboard.range ? 'Recorded range: ' + dashboard.range.start.replace('T', ' ').replace(/\\.\\d+Z$/, ' UTC') + ' → ' + dashboard.range.end.replace('T', ' ').replace(/\\.\\d+Z$/, ' UTC') : 'No snapshots loaded';
-      document.getElementById('generated-label').textContent =
-        'Generated ' + dashboard.generatedAt.replace('T', ' ').replace(/\\.\\d+Z$/, ' UTC');
+      const parts = [];
+      if (latest) {
+        parts.push('<span>' + esc(latest.label.replace(' UTC','')) + '</span>');
+        parts.push('<span>' + esc(latest.commit + (latest.dirty ? '*' : '')) + (latest.branch ? ' on ' + esc(latest.branch) : '') + '</span>');
+      }
+      parts.push('<span>' + rows.length + ' snapshot' + (rows.length !== 1 ? 's' : '') + '</span>');
+      el.innerHTML = parts.join('');
     }
 
-    function renderSummaryCards(rows) {
+    /* ── Health Score ── */
+    function renderHealthScore(rows) {
+      const el = document.getElementById('health-content');
       const latest = rows.at(-1);
-      const summaryEl = document.getElementById('latest-summary');
-      if (!latest?.metrics) {
-        summaryEl.innerHTML = '<article class="mini-card">No structured metrics available for the selected range.</article>';
+      const hs = latest?.healthScore;
+
+      if (!hs) {
+        el.innerHTML = '<div class="health-empty">No health data available for the selected range.</div>';
         return;
       }
 
-      summaryEl.innerHTML = dashboard.metrics.map((metric) => \`
-        <article class="mini-card">
-          <div class="eyebrow">\${metric.title}</div>
-          <strong>\${formatMetric(metric, latest.metrics?.[metric.key])}</strong>
-          <div>\${metricDelta(rows, metric.key)} vs previous snapshot</div>
-        </article>
-      \`).join('');
+      const circumference = 2 * Math.PI * 56;
+      const offset = circumference * (1 - hs.overall / 100);
+      const color = scoreColor(hs.overall);
+      const trendClass = hs.trend > 0 ? 'up' : hs.trend < 0 ? 'down' : 'flat';
+      const trendText = hs.trend > 0 ? '+' + hs.trend : hs.trend < 0 ? String(hs.trend) : '\\u2014';
+
+      el.innerHTML = '<div class="health-row">' +
+        '<div class="health-ring">' +
+          '<svg viewBox="0 0 128 128">' +
+            '<circle cx="64" cy="64" r="56" class="health-ring-track"/>' +
+            '<circle cx="64" cy="64" r="56" class="health-ring-value" ' +
+              'stroke="' + color + '" ' +
+              'stroke-dasharray="' + (circumference - offset).toFixed(1) + ' ' + circumference.toFixed(1) + '"/>' +
+          '</svg>' +
+          '<div class="health-ring-label">' +
+            '<span class="health-number" style="color:' + color + '">' + hs.overall + '</span>' +
+            '<span class="health-trend ' + trendClass + '">' + trendText + '</span>' +
+            '<span class="health-caption">Health</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="health-detail">' +
+          hs.subScores.map(function(s) {
+            return '<div class="sub-score">' +
+              '<span class="sub-score-label">' + esc(s.label) + '</span>' +
+              '<div class="sub-score-bar-track">' +
+                '<div class="sub-score-bar-fill" style="width:' + s.score + '%;background:' + s.color + '"></div>' +
+              '</div>' +
+              '<span class="sub-score-value">' + s.score + '</span>' +
+            '</div>';
+          }).join('') +
+        '</div>' +
+      '</div>';
     }
 
-    function renderCharts(rows) {
-      destroyCharts();
-      const grid = document.getElementById('charts-grid');
-      grid.innerHTML = dashboard.metrics.map((metric) => \`
-        <article class="panel chart-card">
-          <h2>\${metric.title}</h2>
-          <canvas id="chart-\${metric.key}"></canvas>
-        </article>
-      \`).join('');
+    /* ── Hotspots ── */
+    function renderSignalDots(signals) {
+      const dims = [
+        { key: 'complexity', threshold: 0.3 },
+        { key: 'size', threshold: 0.3 },
+        { key: 'issues', threshold: 0.1 },
+        { key: 'instability', threshold: 0.3 },
+      ];
+      return '<span class="hotspot-signals" title="complexity / size / issues / instability">' +
+        dims.map(function(d) {
+          return '<span class="signal-dot ' + d.key + (signals[d.key] >= d.threshold ? ' active' : '') + '"></span>';
+        }).join('') +
+      '</span>';
+    }
 
-      dashboard.metrics.forEach((metric) => {
-        const canvas = document.getElementById('chart-' + metric.key);
+    function renderHotspotList(items) {
+      if (!items?.length) return '<div class="hotspot-empty">No hotspots detected.</div>';
+      return '<div class="hotspot-list">' + items.map(function(h) {
+        const tier = scoreTier(100 - h.score);
+        const meta = [];
+        if (h.stats.lines) meta.push(compact(h.stats.lines) + ' lines');
+        if (h.stats.complexity) meta.push(compact(h.stats.complexity) + ' complexity');
+        if (h.issues.total) meta.push(h.issues.total + ' issue' + (h.issues.total !== 1 ? 's' : ''));
+        return '<div class="hotspot-row">' +
+          '<span class="hotspot-score-badge ' + tier + '">' + h.score + '</span>' +
+          '<div class="hotspot-info">' +
+            '<div class="hotspot-path">' + esc(h.path) + '</div>' +
+            '<div class="hotspot-meta">' + esc(meta.join(' \\u00b7 ')) + '</div>' +
+          '</div>' +
+          renderSignalDots(h.signals) +
+        '</div>';
+      }).join('') + '</div>';
+    }
+
+    function renderHotspots() {
+      const el = document.getElementById('hotspot-content');
+      el.innerHTML = activeHotspotTab === 'files'
+        ? renderHotspotList(dashboard.fileHotspots)
+        : renderHotspotList(dashboard.dirHotspots);
+    }
+
+    /* ── Trends ── */
+    function renderTrends(rows) {
+      destroyCharts();
+      const grid = document.getElementById('trends-grid');
+
+      grid.innerHTML = dashboard.metrics.map(function(m) {
+        const latest = rows.at(-1);
+        const val = latest?.metrics?.[m.key];
+        const delta = metricDelta(rows, m.key);
+        const dClass = deltaClass(m.key, delta);
+        const dText = deltaText(m.key, delta);
+
+        return '<article class="card trend-card">' +
+          '<div class="trend-header">' +
+            '<span class="trend-title">' + m.title + '</span>' +
+          '</div>' +
+          '<div>' +
+            '<span class="trend-value" style="color:' + m.color + '">' + fmtMetric(m, val) + '</span>' +
+            (dText ? '<span class="trend-delta ' + dClass + '">' + dText + '</span>' : '') +
+          '</div>' +
+          '<div class="trend-chart"><canvas id="chart-' + m.key + '"></canvas></div>' +
+        '</article>';
+      }).join('');
+
+      dashboard.metrics.forEach(function(m) {
+        const canvas = document.getElementById('chart-' + m.key);
+        if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        const values = rows.map((row) => row.metrics?.[metric.key] ?? null);
+        const values = rows.map(function(r) { return r.metrics?.[m.key] ?? null; });
         const chart = new Chart(ctx, {
           type: 'line',
           data: {
-            labels: rows.map((row) => row.label),
+            labels: rows.map(function(r) { return r.label; }),
             datasets: [{
-              label: metric.title,
               data: values,
-              borderColor: metric.color,
-              backgroundColor: metric.color + '22',
-              borderWidth: 3,
-              pointRadius: 4,
-              pointHoverRadius: 6,
-              pointBackgroundColor: metric.color,
+              borderColor: m.color,
+              backgroundColor: m.color + '18',
+              borderWidth: 2,
+              pointRadius: rows.length > 30 ? 0 : 3,
+              pointHoverRadius: 4,
+              pointBackgroundColor: m.color,
               spanGaps: true,
-              tension: 0.24,
+              tension: 0.3,
               fill: true,
             }],
           },
@@ -731,30 +1065,29 @@ export function renderDashboardHtml(
             plugins: {
               legend: { display: false },
               tooltip: {
+                titleFont: { size: 11 },
+                bodyFont: { size: 11 },
+                padding: 8,
                 callbacks: {
-                  label(context) {
-                    return metric.title + ': ' + formatMetric(metric, context.raw);
-                  },
-                  afterBody(items) {
-                    const row = rows[items[0]?.dataIndex ?? 0];
-                    return row ? ['Commit: ' + row.commit + (row.dirty ? '*' : ''), 'Status: ' + row.status.pass + 'p/' + row.status.warn + 'w/' + row.status.fail + 'f/' + row.status.skip + 's'] : [];
+                  label: function(ctx) { return fmtMetric(m, ctx.raw); },
+                  afterBody: function(items) {
+                    var row = rows[items[0]?.dataIndex ?? 0];
+                    return row ? [row.commit + (row.dirty ? '*' : '')] : [];
                   },
                 },
               },
             },
             scales: {
-              x: {
-                ticks: { maxRotation: 0, autoSkipPadding: 18, color: '#665f56' },
-                grid: { color: 'rgba(29, 27, 24, 0.06)' },
-              },
+              x: { display: false },
               y: {
+                display: true,
+                grid: { color: 'rgba(26,24,20,0.04)', drawBorder: false },
                 ticks: {
-                  color: '#665f56',
-                  callback(value) {
-                    return formatMetric(metric, value);
-                  },
+                  font: { size: 10 },
+                  color: '#9a938b',
+                  maxTicksLimit: 4,
+                  callback: function(v) { return fmtMetric(m, v); },
                 },
-                grid: { color: 'rgba(29, 27, 24, 0.06)' },
               },
             },
           },
@@ -763,313 +1096,217 @@ export function renderDashboardHtml(
       });
     }
 
-    function renderInsightList(entries, primaryMetric) {
-      if (!entries?.length) {
-        return '<div class="insight-empty">No files matched this ranking.</div>';
-      }
-
-      return '<div class="insight-list">' + entries.map((entry) => {
-        const primaryValue = primaryMetric === 'instability'
-          ? formatInstability(entry.instability)
-          : formatNumber(entry.dependents);
-
-        return \`
-          <div class="insight-row">
-            <div>
-              <div class="insight-path">\${escapeHtml(entry.path)}</div>
-              <div class="insight-meta">
-                Dependencies \${formatNumber(entry.dependencies)} ·
-                Dependents \${formatNumber(entry.dependents)} ·
-                In cycle \${entry.inCycle ? 'Yes' : 'No'}
-              </div>
-            </div>
-            <strong>\${primaryValue}</strong>
-          </div>
-        \`;
-      }).join('') + '</div>';
-    }
-
-    function renderInstability(rows) {
-      const panel = document.getElementById('instability-panel');
-      const latest = rows.at(-1);
-      const instability = latest?.instability;
-
-      if (!instability) {
-        panel.innerHTML = '<article class="mini-card">No dependency instability data available for the selected range.</article>';
-        return;
-      }
-
-      panel.innerHTML = \`
-        <div class="insight-summary">
-          <article class="mini-card">
-            <div class="eyebrow">Files Analyzed</div>
-            <strong>\${formatNumber(instability.summary.totalFiles)}</strong>
-          </article>
-          <article class="mini-card">
-            <div class="eyebrow">Files In Cycles</div>
-            <strong>\${formatNumber(instability.summary.filesInCycles)}</strong>
-          </article>
-          <article class="mini-card">
-            <div class="eyebrow">Average Instability</div>
-            <strong>\${formatInstability(instability.summary.averageInstability)}</strong>
-          </article>
-          <article class="mini-card">
-            <div class="eyebrow">Highest Dependencies</div>
-            <strong>\${formatNumber(instability.summary.highestDependencies)}</strong>
-          </article>
-          <article class="mini-card">
-            <div class="eyebrow">Highest Dependents</div>
-            <strong>\${formatNumber(instability.summary.highestDependents)}</strong>
-          </article>
-        </div>
-        <div class="insight-grid">
-          <article class="insight-card">
-            <h3>Highly Unstable Files</h3>
-            \${renderInsightList(instability.highlyUnstableFiles, 'instability')}
-          </article>
-          <article class="insight-card">
-            <h3>Stable Highly-Depended-On Files</h3>
-            \${renderInsightList(instability.stableHighlyDependedOnFiles, 'dependents')}
-          </article>
-        </div>
-      \`;
-    }
-
+    /* ── Tree ── */
     function getTreeSnapshot(rows) {
-      const latest = rows.at(-1);
+      var latest = rows.at(-1);
       if (!latest) return undefined;
-      const tree = dashboard.trees?.[latest.id];
+      var tree = dashboard.trees?.[latest.id];
       if (!tree) return undefined;
-      return { row: latest, tree };
+      return { row: latest, tree: tree };
     }
 
     function ensureExpanded(tree) {
       if (!tree) return;
-      const root = tree.nodes[tree.rootId];
+      var root = tree.nodes[tree.rootId];
       if (!root) return;
       expandedNodes.add(tree.rootId);
-      root.childIds.slice(0, 6).forEach((childId) => {
-        const child = tree.nodes[childId];
-        if (child?.kind === 'dir') {
-          expandedNodes.add(childId);
-        }
+      root.childIds.slice(0, 6).forEach(function(cid) {
+        var child = tree.nodes[cid];
+        if (child?.kind === 'dir') expandedNodes.add(cid);
       });
     }
 
-    function renderTreeMeta(treeSnapshot) {
-      const meta = document.getElementById('tree-meta');
-      if (!treeSnapshot) {
-        meta.innerHTML = 'No tree data found for the selected range.';
-        return;
-      }
-
-      meta.innerHTML = [
-        'Showing the latest snapshot in the active range: ' + escapeHtml(treeSnapshot.row.label),
-        'Commit ' + escapeHtml(treeSnapshot.row.commit + (treeSnapshot.row.dirty ? '*' : '')) + ' · ' +
-          escapeHtml(treeSnapshot.tree.rootId) + ' root · ' +
-          treeSnapshot.row.tree.nodeCount.toLocaleString('en-US') + ' nodes',
-      ].map((line) => '<div>' + line + '</div>').join('');
-    }
-
     function renderTreeNode(tree, nodeId, depth) {
-      const node = tree.nodes[nodeId];
+      var node = tree.nodes[nodeId];
       if (!node) return '';
-
-      const escapedNodeId = escapeHtml(nodeId);
-      const isDir = node.kind === 'dir';
-      const isExpanded = expandedNodes.has(nodeId);
-      const isSelected = activeNodeId === nodeId;
-      const issueText = node.issues.total > 0 ? compactNumber(node.issues.total) + ' issues' : 'clean';
-      const statText = isDir
-        ? compactNumber(node.stats.files) + ' files'
-        : compactNumber(node.stats.lines) + ' lines';
-      const children = isDir && isExpanded
-        ? '<div class="tree-node-children">' + node.childIds.map((childId) => renderTreeNode(tree, childId, depth + 1)).join('') + '</div>'
+      var isDir = node.kind === 'dir';
+      var isExp = expandedNodes.has(nodeId);
+      var isSel = activeNodeId === nodeId;
+      var issueText = node.issues.total > 0 ? node.issues.total + '' : '';
+      var statText = isDir ? compact(node.stats.files) + ' files' : compact(node.stats.lines) + ' ln';
+      var children = isDir && isExp
+        ? '<div class="tree-node-children">' + node.childIds.map(function(c) { return renderTreeNode(tree, c, depth+1); }).join('') + '</div>'
         : '';
 
-      return \`
-        <div class="tree-node" data-node="\${escapedNodeId}">
-          <div class="tree-line" style="--depth: \${depth}">
-            \${isDir
-              ? '<button type="button" class="tree-toggle" data-toggle="' + escapedNodeId + '">' + (isExpanded ? '&#9662;' : '&#9656;') + '</button>'
-              : '<span class="tree-spacer"></span>'}
-            <button type="button" class="tree-row tree-select \${isSelected ? 'selected' : ''}" data-select-node="\${escapedNodeId}">
-              <span class="tree-label">
-                <span class="tree-icon">\${isDir ? '&#128193;' : '&#128196;'}</span>
-                <span>
-                  <span class="tree-name">\${escapeHtml(node.name || node.path)}</span>
-                  <div class="tree-path">\${escapeHtml(node.path)}</div>
-                </span>
-              </span>
-              <span class="tree-badges">
-                <span class="tree-badge \${node.issues.total > 0 ? 'issues' : ''}">\${escapeHtml(issueText)}</span>
-                <span class="tree-badge">\${escapeHtml(statText)}</span>
-              </span>
-            </button>
-          </div>
-          \${children}
-        </div>
-      \`;
+      return '<div class="tree-node" data-node="' + esc(nodeId) + '">' +
+        '<div class="tree-line" style="--depth:' + depth + '">' +
+          (isDir
+            ? '<button type="button" class="tree-toggle" data-toggle="' + esc(nodeId) + '">' + (isExp ? '\\u25BE' : '\\u25B8') + '</button>'
+            : '<span class="tree-spacer"></span>') +
+          '<button type="button" class="tree-row' + (isSel ? ' selected' : '') + '" data-select-node="' + esc(nodeId) + '">' +
+            '<span class="tree-label">' +
+              '<span class="tree-icon">' + (isDir ? '\\uD83D\\uDCC1' : '\\uD83D\\uDCC4') + '</span>' +
+              '<span class="tree-name">' + esc(node.name || node.path) + '</span>' +
+            '</span>' +
+            '<span class="tree-badges">' +
+              (issueText ? '<span class="tree-badge issues">' + issueText + '</span>' : '') +
+              '<span class="tree-badge">' + statText + '</span>' +
+            '</span>' +
+          '</button>' +
+        '</div>' +
+        children +
+      '</div>';
     }
 
     function renderTreeDetail(treeSnapshot) {
-      const detail = document.getElementById('tree-detail');
+      var detail = document.getElementById('tree-detail');
       if (!treeSnapshot) {
-        detail.innerHTML = '<article class="mini-card">No tree data available yet for the selected range.</article>';
+        detail.innerHTML = '<div style="padding:16px;color:var(--text-tertiary)">No tree data available.</div>';
         return;
       }
+      var tree = treeSnapshot.tree;
+      var node = tree.nodes[activeNodeId] ?? tree.nodes[tree.rootId];
+      if (!node) { detail.innerHTML = ''; return; }
 
-      const tree = treeSnapshot.tree;
-      const node = tree.nodes[activeNodeId] ?? tree.nodes[tree.rootId];
-      if (!node) {
-        detail.innerHTML = '<article class="mini-card">Tree root is missing.</article>';
-        return;
+      var depSection = '';
+      if (node.kind === 'file' && node.dependency) {
+        var d = node.dependency;
+        depSection = '<div>' +
+          '<div class="tree-detail-section-title">Dependencies</div>' +
+          '<div class="tree-detail-list">' +
+            '<div class="tree-detail-list-row"><span>Outgoing</span><strong>' + fmt(d.dependencies) + '</strong></div>' +
+            '<div class="tree-detail-list-row"><span>Incoming</span><strong>' + fmt(d.dependents) + '</strong></div>' +
+            '<div class="tree-detail-list-row"><span>Instability</span><strong>' + (d.instability * 100).toFixed(0) + '%</strong></div>' +
+            '<div class="tree-detail-list-row"><span>In cycle</span><strong>' + (d.inCycle ? 'Yes' : 'No') + '</strong></div>' +
+          '</div></div>';
       }
 
-      detail.innerHTML = \`
-        <div>
-          <div class="eyebrow">\${node.kind === 'dir' ? 'Folder' : 'File'}</div>
-          <h3>\${escapeHtml(node.name || node.path)}</h3>
-          <div class="tree-path">\${escapeHtml(node.path)}</div>
-        </div>
-        <div class="tree-detail-grid">
-          <article class="tree-detail-stat">
-            <div class="eyebrow">Files</div>
-            <strong>\${formatNumber(node.stats.files)}</strong>
-          </article>
-          <article class="tree-detail-stat">
-            <div class="eyebrow">Lines</div>
-            <strong>\${formatNumber(node.stats.lines)}</strong>
-          </article>
-          <article class="tree-detail-stat">
-            <div class="eyebrow">Code</div>
-            <strong>\${formatNumber(node.stats.code)}</strong>
-          </article>
-          <article class="tree-detail-stat">
-            <div class="eyebrow">Complexity</div>
-            <strong>\${formatNumber(node.stats.complexity)}</strong>
-          </article>
-        </div>
-        <div>
-          <h4>Issue Rollup</h4>
-          <div class="tree-detail-list">
-            <div>Total: \${formatNumber(node.issues.total)}</div>
-            <div>Unused: \${formatNumber(node.issues.unused)}</div>
-            <div>Duplication: \${formatNumber(node.issues.duplication)}</div>
-            <div>Cycles: \${formatNumber(node.issues.cycles)}</div>
-            <div>Children: \${formatNumber(node.childIds.length)}</div>
-          </div>
-        </div>
-        \${node.kind === 'file' && node.dependency ? \`
-          <div>
-            <h4>Dependency Instability</h4>
-            <div class="tree-detail-list">
-              <div>Dependencies: \${formatNumber(node.dependency.dependencies)}</div>
-              <div>Dependents: \${formatNumber(node.dependency.dependents)}</div>
-              <div>Instability: \${formatInstability(node.dependency.instability)}</div>
-              <div>In cycle: \${node.dependency.inCycle ? 'Yes' : 'No'}</div>
-            </div>
-          </div>
-        \` : ''}
-      \`;
+      detail.innerHTML =
+        '<div>' +
+          '<h3>' + esc(node.name || node.path) + '</h3>' +
+          '<div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">' + esc(node.path) + '</div>' +
+        '</div>' +
+        '<div>' +
+          '<div class="tree-detail-section-title">Stats</div>' +
+          '<div class="tree-detail-grid">' +
+            '<div class="tree-detail-stat"><div class="tree-detail-stat-label">Files</div><div class="tree-detail-stat-value">' + fmt(node.stats.files) + '</div></div>' +
+            '<div class="tree-detail-stat"><div class="tree-detail-stat-label">Lines</div><div class="tree-detail-stat-value">' + fmt(node.stats.lines) + '</div></div>' +
+            '<div class="tree-detail-stat"><div class="tree-detail-stat-label">Code</div><div class="tree-detail-stat-value">' + fmt(node.stats.code) + '</div></div>' +
+            '<div class="tree-detail-stat"><div class="tree-detail-stat-label">Complexity</div><div class="tree-detail-stat-value">' + fmt(node.stats.complexity) + '</div></div>' +
+          '</div>' +
+        '</div>' +
+        '<div>' +
+          '<div class="tree-detail-section-title">Issues</div>' +
+          '<div class="tree-detail-list">' +
+            '<div class="tree-detail-list-row"><span>Unused</span><strong>' + fmt(node.issues.unused) + '</strong></div>' +
+            '<div class="tree-detail-list-row"><span>Duplication</span><strong>' + fmt(node.issues.duplication) + '</strong></div>' +
+            '<div class="tree-detail-list-row"><span>Cycles</span><strong>' + fmt(node.issues.cycles) + '</strong></div>' +
+          '</div>' +
+        '</div>' +
+        depSection;
     }
 
     function renderTree(rows) {
-      const treeRoot = document.getElementById('tree-root');
-      const treeSnapshot = getTreeSnapshot(rows);
-      renderTreeMeta(treeSnapshot);
+      var treeRoot = document.getElementById('tree-root');
+      var treeSnapshot = getTreeSnapshot(rows);
+      var metaEl = document.getElementById('tree-meta');
 
       if (!treeSnapshot) {
         activeTreeSnapshotId = null;
         activeNodeId = null;
-        treeRoot.innerHTML = '<article class="mini-card">No tree data found for the latest snapshot in this range.</article>';
+        treeRoot.innerHTML = '<div style="padding:16px;color:var(--text-tertiary)">No tree data for this range.</div>';
+        metaEl.textContent = '';
         renderTreeDetail(undefined);
         return;
       }
 
-      const tree = treeSnapshot.tree;
+      var tree = treeSnapshot.tree;
+      metaEl.textContent = esc(treeSnapshot.row.label) + ' \\u00b7 ' + treeSnapshot.row.tree.nodeCount + ' nodes';
+
       if (activeTreeSnapshotId !== treeSnapshot.row.id) {
         activeTreeSnapshotId = treeSnapshot.row.id;
         activeNodeId = tree.rootId;
       }
-
       ensureExpanded(tree);
       treeRoot.innerHTML = renderTreeNode(tree, tree.rootId, 0);
       renderTreeDetail(treeSnapshot);
     }
 
+    /* ── Table ── */
     function renderTable(rows) {
-      const body = document.getElementById('history-body');
-      body.innerHTML = rows.slice().reverse().map((row) => \`
-        <tr>
-          <td>\${escapeHtml(row.label)}</td>
-          <td>\${escapeHtml(row.commit + (row.dirty ? '*' : ''))}</td>
-          <td>
-            <span class="status-pill">
-              <span class="status-dot"></span>
-              \${row.status.pass}p / \${row.status.warn}w / \${row.status.fail}f / \${row.status.skip}s
-            </span>
-          </td>
-          <td>\${formatNumber(row.metrics?.lines)}</td>
-          <td>\${formatNumber(row.metrics?.complexity)}</td>
-          <td>\${formatNumber(row.metrics?.unused)}</td>
-          <td>\${formatPercent(row.metrics?.duplication)}</td>
-          <td>\${formatNumber(row.metrics?.cycles)}</td>
-        </tr>
-      \`).join('');
+      var body = document.getElementById('history-body');
+      body.innerHTML = rows.slice().reverse().map(function(row) {
+        var dots = '';
+        for (var i = 0; i < row.status.pass; i++) dots += '<span class="status-dot pass"></span>';
+        for (var j = 0; j < row.status.warn; j++) dots += '<span class="status-dot warn"></span>';
+        for (var k = 0; k < row.status.fail; k++) dots += '<span class="status-dot fail"></span>';
+        for (var l = 0; l < row.status.skip; l++) dots += '<span class="status-dot skip"></span>';
+
+        return '<tr>' +
+          '<td>' + esc(row.label.replace(' UTC','')) + '</td>' +
+          '<td><span class="commit-badge">' + esc(row.commit + (row.dirty ? '*':'')) + '</span></td>' +
+          '<td>' + (row.healthScore ? row.healthScore.overall : '\\u2014') + '</td>' +
+          '<td><span class="status-dots">' + dots + '</span></td>' +
+          '<td>' + fmt(row.metrics?.lines) + '</td>' +
+          '<td>' + fmt(row.metrics?.complexity) + '</td>' +
+          '<td>' + fmt(row.metrics?.unused) + '</td>' +
+          '<td>' + fmtPct(row.metrics?.duplication) + '</td>' +
+          '<td>' + fmt(row.metrics?.cycles) + '</td>' +
+        '</tr>';
+      }).join('');
     }
 
-    function setActiveButton(rangeId) {
-      document.querySelectorAll('#range-controls button').forEach((button) => {
-        button.classList.toggle('active', button.dataset.range === rangeId);
-      });
-    }
-
+    /* ── Render All ── */
     function render(rangeId) {
       activeRange = rangeId;
-      const rows = getRowsForRange(rangeId);
-      setActiveButton(rangeId);
-      renderHero(rows);
-      renderSummaryCards(rows);
-      renderCharts(rows);
-      renderInstability(rows);
+      var rows = getRows(rangeId);
+      document.querySelectorAll('#range-controls button').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.range === rangeId);
+      });
+      renderHeader(rows);
+      renderHealthScore(rows);
+      renderHotspots();
+      renderTrends(rows);
       renderTree(rows);
       renderTable(rows);
     }
 
-    const rangeControls = document.getElementById('range-controls');
-    rangeControls.innerHTML = dashboard.controls.map((control) => \`
-      <button type="button" data-range="\${control.id}" class="\${control.id === activeRange ? 'active' : ''}">
-        \${control.label}
-      </button>
-    \`).join('');
+    /* ── Init ── */
+    var rangeEl = document.getElementById('range-controls');
+    rangeEl.innerHTML = dashboard.controls.map(function(c) {
+      return '<button type="button" data-range="' + c.id + '"' + (c.id === activeRange ? ' class="active"' : '') + '>' + c.label + '</button>';
+    }).join('');
 
-    rangeControls.addEventListener('click', (event) => {
-      const button = event.target.closest('button[data-range]');
-      if (!button) return;
-      render(button.dataset.range);
+    rangeEl.addEventListener('click', function(e) {
+      var btn = e.target.closest('button[data-range]');
+      if (btn) render(btn.dataset.range);
     });
 
-    document.getElementById('toggle-table').addEventListener('click', () => {
-      const panel = document.getElementById('table-panel');
-      const hidden = panel.classList.toggle('hidden');
-      document.getElementById('toggle-table').textContent = hidden ? 'Show Table' : 'Hide Table';
+    document.getElementById('toggle-table').addEventListener('click', function() {
+      var panel = document.getElementById('table-panel');
+      var hidden = panel.classList.toggle('hidden');
+      this.textContent = hidden ? 'Show Table' : 'Hide Table';
     });
 
-    document.getElementById('tree-root').addEventListener('click', (event) => {
-      const toggle = event.target.closest('[data-toggle]');
+    document.getElementById('toggle-tree').addEventListener('click', function() {
+      var panel = document.getElementById('tree-section');
+      var hidden = panel.classList.toggle('hidden');
+      this.textContent = hidden ? 'Show Tree' : 'Hide Tree';
+    });
+
+    document.getElementById('hotspot-tabs').addEventListener('click', function(e) {
+      var tab = e.target.closest('[data-hotspot-tab]');
+      if (!tab) return;
+      activeHotspotTab = tab.dataset.hotspotTab;
+      this.querySelectorAll('.hotspots-tab').forEach(function(t) {
+        t.classList.toggle('active', t.dataset.hotspotTab === activeHotspotTab);
+      });
+      renderHotspots();
+    });
+
+    document.getElementById('tree-root').addEventListener('click', function(e) {
+      var toggle = e.target.closest('[data-toggle]');
       if (toggle) {
-        const nodeId = toggle.dataset.toggle;
-        if (expandedNodes.has(nodeId)) expandedNodes.delete(nodeId);
-        else expandedNodes.add(nodeId);
+        var nid = toggle.dataset.toggle;
+        if (expandedNodes.has(nid)) expandedNodes.delete(nid);
+        else expandedNodes.add(nid);
         render(activeRange);
         return;
       }
-
-      const button = event.target.closest('[data-select-node]');
-      if (!button) return;
-      activeNodeId = button.dataset.selectNode;
-      const rows = getRowsForRange(activeRange);
+      var btn = e.target.closest('[data-select-node]');
+      if (!btn) return;
+      activeNodeId = btn.dataset.selectNode;
+      var rows = getRows(activeRange);
       renderTree(rows);
     });
 
