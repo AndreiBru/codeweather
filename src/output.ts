@@ -7,7 +7,7 @@ import type {
   UnusedMetrics,
 } from './checks/types.js'
 import { findMetric } from './checks/metrics.js'
-import type { Snapshot, SnapshotCheck } from './history/types.js'
+import type { SnapshotCheckSummary, SnapshotSummary } from './history/types.js'
 
 export function header(title: string): string {
   const line = '─'.repeat(60)
@@ -99,14 +99,14 @@ function formatPercentDelta(value: number): string {
 
 export function getTrendLine(
   results: CheckResult[],
-  previousSnapshot: Snapshot,
+  previousSnapshot: SnapshotSummary,
 ): string | undefined {
   const currentStats = findMetric(results, 'stats-overview') as StatsOverviewMetrics | undefined
   const currentUnused = findMetric(results, 'unused') as UnusedMetrics | undefined
   const currentDuplicates = findMetric(results, 'duplicates') as DuplicatesMetrics | undefined
   const currentCycles = findMetric(results, 'cycles') as CyclesMetrics | undefined
 
-  const previousChecks = previousSnapshot.checks as SnapshotCheck[]
+  const previousChecks = previousSnapshot.checks as SnapshotCheckSummary[]
   const previousStats = findMetric(previousChecks, 'stats-overview') as StatsOverviewMetrics | undefined
   const previousUnused = findMetric(previousChecks, 'unused') as UnusedMetrics | undefined
   const previousDuplicates = findMetric(previousChecks, 'duplicates') as DuplicatesMetrics | undefined
@@ -134,7 +134,7 @@ export function getTrendLine(
   ].join(' · ')
 }
 
-export function printDelta(results: CheckResult[], previousSnapshot: Snapshot): void {
+export function printDelta(results: CheckResult[], previousSnapshot: SnapshotSummary): void {
   const trendLine = getTrendLine(results, previousSnapshot)
   if (!trendLine) {
     return

@@ -25,6 +25,14 @@ interface KnipJsonResult {
   issues?: KnipIssueEntry[]
 }
 
+interface KnipIssueRow extends KnipIssueEntry {
+  file?: string
+}
+
+interface KnipJsonArtifact extends KnipJsonResult {
+  issues?: KnipIssueRow[]
+}
+
 function buildArgs(
   config: ResolvedConfig,
   options: { forceJsonReporter?: boolean } = {},
@@ -136,16 +144,30 @@ export function parseKnipMetrics(output: string): UnusedMetrics | undefined {
   }
 }
 
-async function extractMetrics(config: ResolvedConfig): Promise<UnusedMetrics | undefined> {
+async function extractMetrics(
+  config: ResolvedConfig,
+): Promise<{ metrics?: UnusedMetrics; artifacts?: CheckResult['artifacts'] }> {
   const result = await exec(ownBin('knip'), buildArgs(config, { forceJsonReporter: true }), {
     cwd: config.cwd,
   })
 
   if (result.exitCode !== 0) {
-    return undefined
+    return { metrics: undefined, artifacts: undefined }
   }
 
-  return parseKnipMetrics(result.stdout)
+  let artifact: KnipJsonArtifact | undefined
+  try {
+    artifact = JSON.parse(result.stdout) as KnipJsonArtifact
+  } catch {
+    artifact = undefined
+  }
+
+  return {
+    metrics: parseKnipMetrics(result.stdout),
+    artifacts: artifact
+      ? [{ id: 'unused', format: 'json', data: artifact }]
+      : undefined,
+  }
 }
 
 export const unusedCheck: Check = {
@@ -162,7 +184,7 @@ export const unusedCheck: Check = {
 
     const output = result.stdout
 
-    const metrics = await extractMetrics(config)
+    const { metrics, artifacts } = await extractMetrics(config)
     const hasIssues = metrics
       ? metrics.totalIssues > 0
       : (
@@ -182,6 +204,7 @@ export const unusedCheck: Check = {
       output,
       duration,
       metrics,
+      artifacts,
     }
   },
 }

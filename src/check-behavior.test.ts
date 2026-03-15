@@ -119,6 +119,58 @@ describe('check behavior', () => {
     expect(firstArgs).toContain('stories')
   })
 
+  it('captures complexity metrics from scc json without forcing wide text output', async () => {
+    const execMock = vi.fn()
+      .mockResolvedValueOnce({ stdout: 'tabular complexity output', stderr: '', exitCode: 0 })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify([
+          {
+            Name: 'TypeScript',
+            Files: [
+              { Location: 'src/a.ts', Lines: 10, Code: 8, Complexity: 7 },
+              { Location: 'src/b.ts', Lines: 12, Code: 9, Complexity: 3 },
+            ],
+          },
+        ]),
+        stderr: '',
+        exitCode: 0,
+      })
+
+    vi.doMock('./utils/exec.js', () => ({
+      exec: execMock,
+      isOnPath: vi.fn(async () => true),
+    }))
+
+    const { statsComplexity } = await import('./checks/stats.js')
+    const result = await statsComplexity.run(makeConfig())
+
+    expect(result.metrics).toEqual({
+      kind: 'stats-complexity',
+      topFiles: [
+        { path: 'src/a.ts', lines: 10, code: 8, complexity: 7 },
+        { path: 'src/b.ts', lines: 12, code: 9, complexity: 3 },
+      ],
+    })
+    expect(result.artifacts?.[0]).toEqual({
+      id: 'stats-complexity',
+      format: 'json',
+      data: [
+        {
+          Name: 'TypeScript',
+          Files: [
+            { Location: 'src/a.ts', Lines: 10, Code: 8, Complexity: 7 },
+            { Location: 'src/b.ts', Lines: 12, Code: 9, Complexity: 3 },
+          ],
+        },
+      ],
+    })
+
+    const jsonArgs = execMock.mock.calls[1]?.[1] as string[]
+    expect(jsonArgs).toContain('-f')
+    expect(jsonArgs).toContain('json')
+    expect(jsonArgs).not.toContain('-w')
+  })
+
   it('marks knip results as warn from metrics even when stdout is json', async () => {
     const execMock = vi.fn()
       .mockResolvedValueOnce({ stdout: '{"issues":[{"exports":[{"name":"foo"}]}]}', stderr: '', exitCode: 0 })

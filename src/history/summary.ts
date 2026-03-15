@@ -5,7 +5,7 @@ import type {
   UnusedMetrics,
 } from '../checks/types.js'
 import { findMetric } from '../checks/metrics.js'
-import type { Snapshot } from './types.js'
+import type { SnapshotSummary } from './types.js'
 
 export interface SnapshotStatusCounts {
   pass: number
@@ -22,7 +22,7 @@ export interface SnapshotTrendMetrics {
   cycles: number
 }
 
-export function getSnapshotStatusCounts(snapshot: Snapshot): SnapshotStatusCounts {
+export function getSnapshotStatusCounts(snapshot: SnapshotSummary): SnapshotStatusCounts {
   return snapshot.checks.reduce<SnapshotStatusCounts>((counts, check) => {
     counts[check.status] += 1
     return counts
@@ -34,7 +34,7 @@ export function getSnapshotStatusCounts(snapshot: Snapshot): SnapshotStatusCount
   })
 }
 
-export function getSnapshotTrendMetrics(snapshot: Snapshot): SnapshotTrendMetrics | undefined {
+export function getSnapshotTrendMetrics(snapshot: SnapshotSummary): SnapshotTrendMetrics | undefined {
   const stats = findMetric(snapshot.checks, 'stats-overview') as StatsOverviewMetrics | undefined
   const unused = findMetric(snapshot.checks, 'unused') as UnusedMetrics | undefined
   const duplicates = findMetric(snapshot.checks, 'duplicates') as DuplicatesMetrics | undefined
@@ -57,7 +57,7 @@ export function formatSnapshotTimestamp(timestamp: string): string {
   return timestamp.replace('T', ' ').replace(/\.\d+Z$/, ' UTC')
 }
 
-export function getSnapshotRange(snapshots: Snapshot[]): { start: string; end: string } | undefined {
+export function getSnapshotRange(snapshots: SnapshotSummary[]): { start: string; end: string } | undefined {
   if (snapshots.length === 0) {
     return undefined
   }

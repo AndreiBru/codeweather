@@ -7,6 +7,15 @@ import { exec, ownBin } from '../utils/exec.js'
 import { stripFlagPairs } from '../utils/args.js'
 
 interface JscpdReport {
+  duplicates?: unknown[]
+  statistic?: {
+    total?: {
+      clones?: number
+      percentage?: number
+      percentageTokens?: number
+      lines?: number
+    }
+  }
   statistics?: {
     total?: {
       clones?: number
@@ -57,7 +66,7 @@ function buildArgs(
 export function parseJscpdMetrics(output: string): DuplicatesMetrics | undefined {
   try {
     const parsed = JSON.parse(output) as JscpdReport
-    const totals = parsed.statistics?.total
+    const totals = parsed.statistics?.total ?? parsed.statistic?.total
     if (!totals) {
       return undefined
     }
@@ -74,7 +83,9 @@ export function parseJscpdMetrics(output: string): DuplicatesMetrics | undefined
   }
 }
 
-async function extractMetrics(config: ResolvedConfig): Promise<DuplicatesMetrics | undefined> {
+async function extractMetrics(
+  config: ResolvedConfig,
+): Promise<{ metrics?: DuplicatesMetrics; artifacts?: CheckResult['artifacts'] }> {
   const outputDir = mkdtempSync(join(tmpdir(), 'codeweather-jscpd-'))
   const reportPath = resolve(outputDir, 'jscpd-report.json')
 
@@ -84,10 +95,23 @@ async function extractMetrics(config: ResolvedConfig): Promise<DuplicatesMetrics
     })
 
     if (result.exitCode !== 0 || !existsSync(reportPath)) {
-      return undefined
+      return { metrics: undefined, artifacts: undefined }
     }
 
-    return parseJscpdMetrics(readFileSync(reportPath, 'utf8'))
+    const report = readFileSync(reportPath, 'utf8')
+    let artifact: JscpdReport | undefined
+    try {
+      artifact = JSON.parse(report) as JscpdReport
+    } catch {
+      artifact = undefined
+    }
+
+    return {
+      metrics: parseJscpdMetrics(report),
+      artifacts: artifact
+        ? [{ id: 'duplicates', format: 'json', data: artifact }]
+        : undefined,
+    }
   } finally {
     rmSync(outputDir, { recursive: true, force: true })
   }
@@ -106,7 +130,7 @@ export const duplicatesCheck: Check = {
     const duration = Date.now() - start
 
     const output = result.stdout + (result.stderr ? '\n' + result.stderr : '')
-    const metrics = await extractMetrics(config)
+    const { metrics, artifacts } = await extractMetrics(config)
 
     const hasDuplicates = metrics
       ? metrics.totalClones > 0
@@ -123,6 +147,7 @@ export const duplicatesCheck: Check = {
       output: result.stdout,
       duration,
       metrics,
+      artifacts,
     }
   },
 }

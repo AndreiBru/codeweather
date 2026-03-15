@@ -5,6 +5,7 @@ import { createSnapshot } from './history/store.js'
 
 const snapshots = [
   createSnapshot({
+    src: 'src',
     timestamp: '2026-03-10T10:00:00.000Z',
     duration: 100,
     git: { commit: 'aaa1111', branch: 'main', dirty: false },
@@ -71,6 +72,7 @@ const snapshots = [
     ],
   }),
   createSnapshot({
+    src: 'src',
     timestamp: '2026-03-10T11:00:00.000Z',
     duration: 120,
     git: { commit: 'bbb2222', branch: 'main', dirty: true },

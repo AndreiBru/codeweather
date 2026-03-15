@@ -3,13 +3,13 @@ import { basename, dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { buildDashboardRows, dashboardMetrics } from './charts.js'
 import { getSnapshotRange } from '../history/summary.js'
-import type { Snapshot } from '../history/types.js'
+import type { SnapshotSummary } from '../history/types.js'
 
 const require = createRequire(import.meta.url)
 
 export function renderDashboardHtml(
   cwd: string,
-  snapshots: Snapshot[],
+  snapshots: SnapshotSummary[],
 ): string {
   const rows = buildDashboardRows(snapshots)
   const range = getSnapshotRange(snapshots)

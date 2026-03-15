@@ -130,7 +130,7 @@ export function parseDepCruiseMetrics(output: string): CyclesMetrics | undefined
 async function extractMetrics(
   config: ResolvedConfig,
   configPath: string,
-): Promise<CyclesMetrics | undefined> {
+): Promise<{ metrics?: CyclesMetrics; artifacts?: CheckResult['artifacts'] }> {
   const result = await exec(ownBin('depcruise'), buildArgs(config, configPath, {
     forceJsonMetrics: true,
   }), {
@@ -138,10 +138,22 @@ async function extractMetrics(
   })
 
   if (result.exitCode !== 0) {
-    return undefined
+    return { metrics: undefined, artifacts: undefined }
   }
 
-  return parseDepCruiseMetrics(result.stdout)
+  let artifact: DepCruiseJsonResult | undefined
+  try {
+    artifact = JSON.parse(result.stdout) as DepCruiseJsonResult
+  } catch {
+    artifact = undefined
+  }
+
+  return {
+    metrics: parseDepCruiseMetrics(result.stdout),
+    artifacts: artifact
+      ? [{ id: 'cycles', format: 'json', data: artifact }]
+      : undefined,
+  }
 }
 
 export const cyclesCheck: Check = {
@@ -175,7 +187,7 @@ export const cyclesCheck: Check = {
 
       const output = result.stdout
 
-      const metrics = await extractMetrics(config, configPath)
+      const { metrics, artifacts } = await extractMetrics(config, configPath)
       const hasCycles = metrics
         ? metrics.cycleCount > 0
         : (result.exitCode !== 0 || output.includes('error no-circular'))
@@ -189,6 +201,7 @@ export const cyclesCheck: Check = {
         output,
         duration,
         metrics,
+        artifacts,
       }
     } finally {
       if (!useOwnConfig) {

@@ -8,13 +8,21 @@ import {
 } from 'node:fs'
 import { resolve } from 'node:path'
 import type { CheckResult } from '../checks/types.js'
-import type { Snapshot, SnapshotGitMeta } from './types.js'
+import { buildSnapshotArtifactMap, buildSnapshotTreeIndex } from './tree.js'
+import type {
+  SnapshotArtifactMeta,
+  SnapshotBundle,
+  SnapshotGitMeta,
+  SnapshotSummary,
+} from './types.js'
 
-export interface SaveSnapshotOptions {
+export interface SaveSnapshotBundleOptions {
   cwd: string
+  src?: string
   historyDir: string
   results: CheckResult[]
   duration: number
+  report?: string
   git?: SnapshotGitMeta
   timestamp?: string
 }
@@ -27,15 +35,45 @@ export function getSnapshotDir(cwd: string, historyDir: string): string {
   return resolve(getHistoryDir(cwd, historyDir), 'snapshots')
 }
 
-export function createSnapshot({
+function createSnapshotId(timestamp: string, git?: SnapshotGitMeta): string {
+  const stamp = timestamp.replace(/:/g, '-')
+  const commit = git?.commit ?? 'nogit'
+  return `${stamp}_${commit}`
+}
+
+function createSnapshotArtifactMeta(results: CheckResult[]): SnapshotArtifactMeta[] {
+  return results.flatMap((result) => (result.artifacts ?? []).map((artifact) => ({
+    id: artifact.id,
+    checkName: result.name,
+    format: artifact.format,
+    path: `artifacts/${artifact.id}.json`,
+  })))
+}
+
+export function createSnapshotSummary({
   results,
   duration,
   git,
   timestamp,
-}: Omit<SaveSnapshotOptions, 'cwd' | 'historyDir'>): Snapshot {
+  src,
+}: Omit<SaveSnapshotBundleOptions, 'cwd' | 'historyDir' | 'report'>): SnapshotSummary {
+  const sourceRoot = src ?? '.'
+  const createdAt = timestamp ?? new Date().toISOString()
+  const id = createSnapshotId(createdAt, git)
+  const artifacts = createSnapshotArtifactMeta(results)
+  const artifactData = Object.fromEntries(
+    results.flatMap((result) => (result.artifacts ?? []).map((artifact) => [artifact.id, artifact.data])),
+  )
+  const tree = buildSnapshotTreeIndex({
+    cwd: '.',
+    src: sourceRoot,
+    artifacts: buildSnapshotArtifactMap(artifacts, artifactData),
+  })
+
   return {
-    version: 1,
-    timestamp: timestamp ?? new Date().toISOString(),
+    version: 2,
+    id,
+    timestamp: createdAt,
     git,
     duration,
     checks: results.map((result) => ({
@@ -45,44 +83,89 @@ export function createSnapshot({
       duration: result.duration,
       metrics: result.metrics,
     })),
+    artifacts,
+    tree: {
+      path: tree.rootId,
+      rootId: tree.rootId,
+      nodeCount: Object.keys(tree.nodes).length,
+    },
   }
 }
 
-export function createSnapshotFilename(snapshot: Snapshot): string {
-  const stamp = snapshot.timestamp.replace(/:/g, '-')
-  const commit = snapshot.git?.commit ?? 'nogit'
-  return `${stamp}_${commit}.json`
+export function createSnapshotBundleId(summary: SnapshotSummary): string {
+  return summary.id
 }
 
-export function saveSnapshot(options: SaveSnapshotOptions): { snapshot: Snapshot; path: string } {
-  const snapshotDir = getSnapshotDir(options.cwd, options.historyDir)
-  mkdirSync(snapshotDir, { recursive: true })
+export function saveSnapshotBundle(options: SaveSnapshotBundleOptions): { summary: SnapshotSummary; path: string } {
+  const sourceRoot = options.src ?? '.'
+  const snapshotRootDir = getSnapshotDir(options.cwd, options.historyDir)
+  mkdirSync(snapshotRootDir, { recursive: true })
 
-  const snapshot = createSnapshot(options)
-  const path = resolve(snapshotDir, createSnapshotFilename(snapshot))
+  const artifacts = createSnapshotArtifactMeta(options.results)
+  const artifactData = Object.fromEntries(
+    options.results.flatMap((result) => (result.artifacts ?? []).map((artifact) => [artifact.id, artifact.data])),
+  )
+  const tree = buildSnapshotTreeIndex({
+    cwd: options.cwd,
+    src: sourceRoot,
+    artifacts: buildSnapshotArtifactMap(artifacts, artifactData),
+  })
 
-  writeFileSync(path, JSON.stringify(snapshot, null, 2))
+  const createdAt = options.timestamp ?? new Date().toISOString()
+  const id = createSnapshotId(createdAt, options.git)
+  const summary: SnapshotSummary = {
+    version: 2,
+    id,
+    timestamp: createdAt,
+    git: options.git,
+    duration: options.duration,
+    checks: options.results.map((result) => ({
+      name: result.name,
+      status: result.status,
+      summary: result.summary,
+      duration: result.duration,
+      metrics: result.metrics,
+    })),
+    artifacts,
+    tree: {
+      path: tree.rootId,
+      rootId: tree.rootId,
+      nodeCount: Object.keys(tree.nodes).length,
+    },
+  }
 
-  return { snapshot, path }
+  const bundleDir = resolve(snapshotRootDir, id)
+  const artifactDir = resolve(bundleDir, 'artifacts')
+  mkdirSync(artifactDir, { recursive: true })
+
+  writeFileSync(resolve(bundleDir, 'summary.json'), JSON.stringify(summary, null, 2))
+  writeFileSync(resolve(bundleDir, 'report.md'), options.report ?? '')
+  writeFileSync(resolve(bundleDir, 'tree.json'), JSON.stringify(tree, null, 2))
+
+  for (const artifact of artifacts) {
+    writeFileSync(resolve(bundleDir, artifact.path), JSON.stringify(artifactData[artifact.id], null, 2))
+  }
+
+  return { summary, path: bundleDir }
 }
 
-export function loadSnapshots(
+export function loadSnapshotSummaries(
   cwd: string,
   historyDir: string,
   limit?: number,
-): Snapshot[] {
+): SnapshotSummary[] {
   const snapshotDir = getSnapshotDir(cwd, historyDir)
   if (!existsSync(snapshotDir)) {
     return []
   }
 
-  const selected = listSnapshotFiles(snapshotDir, limit)
-  const snapshots: Snapshot[] = []
+  const selected = listSnapshotBundleDirs(snapshotDir, limit)
+  const snapshots: SnapshotSummary[] = []
 
   for (const name of selected) {
     try {
-      const raw = readFileSync(resolve(snapshotDir, name), 'utf8')
-      snapshots.push(JSON.parse(raw) as Snapshot)
+      const raw = readFileSync(resolve(snapshotDir, name, 'summary.json'), 'utf8')
+      snapshots.push(JSON.parse(raw) as SnapshotSummary)
     } catch {
       // Ignore malformed snapshots instead of breaking the run.
     }
@@ -91,11 +174,41 @@ export function loadSnapshots(
   return snapshots
 }
 
-export function loadLatestSnapshot(
+export function loadLatestSnapshotSummary(
   cwd: string,
   historyDir: string,
-): Snapshot | undefined {
-  return loadSnapshots(cwd, historyDir, 1)[0]
+): SnapshotSummary | undefined {
+  return loadSnapshotSummaries(cwd, historyDir, 1)[0]
+}
+
+export function loadSnapshotBundle(
+  cwd: string,
+  historyDir: string,
+  id: string,
+): SnapshotBundle | undefined {
+  const bundleDir = resolve(getSnapshotDir(cwd, historyDir), id)
+  if (!existsSync(bundleDir)) {
+    return undefined
+  }
+
+  try {
+    const summary = JSON.parse(readFileSync(resolve(bundleDir, 'summary.json'), 'utf8')) as SnapshotSummary
+    const report = readFileSync(resolve(bundleDir, 'report.md'), 'utf8')
+    const tree = JSON.parse(readFileSync(resolve(bundleDir, 'tree.json'), 'utf8')) as SnapshotBundle['tree']
+    const artifacts = Object.fromEntries(summary.artifacts.map((artifact) => ([
+      artifact.id,
+      JSON.parse(readFileSync(resolve(bundleDir, artifact.path), 'utf8')) as unknown,
+    ])))
+
+    return {
+      summary,
+      report,
+      tree,
+      artifacts,
+    }
+  } catch {
+    return undefined
+  }
 }
 
 export function pruneSnapshots(
@@ -112,20 +225,28 @@ export function pruneSnapshots(
     return 0
   }
 
-  const names = listSnapshotFiles(snapshotDir)
+  const names = listSnapshotBundleDirs(snapshotDir)
   const extra = names.slice(maxSnapshots)
 
   for (const name of extra) {
-    rmSync(resolve(snapshotDir, name), { force: true })
+    rmSync(resolve(snapshotDir, name), { recursive: true, force: true })
   }
 
   return extra.length
 }
 
-function listSnapshotFiles(snapshotDir: string, limit?: number): string[] {
+function listSnapshotBundleDirs(snapshotDir: string, limit?: number): string[] {
   const names = readdirSync(snapshotDir)
-    .filter((name) => name.endsWith('.json'))
+    .filter((name) => existsSync(resolve(snapshotDir, name, 'summary.json')))
     .sort((a, b) => b.localeCompare(a))
 
   return limit == null ? names : names.slice(0, limit)
+}
+
+export {
+  createSnapshotSummary as createSnapshot,
+  createSnapshotBundleId as createSnapshotFilename,
+  loadLatestSnapshotSummary as loadLatestSnapshot,
+  loadSnapshotSummaries as loadSnapshots,
+  saveSnapshotBundle as saveSnapshot,
 }

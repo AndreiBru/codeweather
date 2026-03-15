@@ -4,7 +4,8 @@ import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CheckResult, StatsOverviewMetrics } from './checks/types.js'
 import type { ResolvedConfig } from './config.js'
-import type { Snapshot } from './history/types.js'
+import { createSnapshot } from './history/store.js'
+import type { SnapshotSummary } from './history/types.js'
 
 function makeResult(
   name: string,
@@ -31,11 +32,11 @@ const overviewMetrics: StatsOverviewMetrics = {
   languages: [],
 }
 
-const previousSnapshot: Snapshot = {
-  version: 1,
+const previousSnapshot: SnapshotSummary = createSnapshot({
+  src: 'src',
   timestamp: '2026-03-10T09:00:00.000Z',
   duration: 100,
-  checks: [
+  results: [
     makeResult('Codebase Stats', overviewMetrics),
     makeResult('Top Complexity', { kind: 'stats-complexity', topFiles: [] }),
     makeResult('Top File Size', { kind: 'stats-lines', topFiles: [] }),
@@ -61,7 +62,7 @@ const previousSnapshot: Snapshot = {
       cycleCount: 0,
     }),
   ],
-}
+})
 
 let tempDir: string
 
@@ -158,7 +159,7 @@ function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
 }
 
 async function loadRunnerWithMocks(options: {
-  previous?: Snapshot
+  previous?: SnapshotSummary
   saveSnapshotImpl?: ReturnType<typeof vi.fn>
   printDeltaImpl?: ReturnType<typeof vi.fn>
 }) {

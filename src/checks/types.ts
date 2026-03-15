@@ -60,6 +60,12 @@ export interface CyclesMetrics {
   cycleCount: number
 }
 
+export interface JsonCheckArtifact {
+  id: string
+  format: 'json'
+  data: unknown
+}
+
 export type CheckMetrics =
   | StatsOverviewMetrics
   | StatsComplexityMetrics
@@ -68,6 +74,8 @@ export type CheckMetrics =
   | DuplicatesMetrics
   | CyclesMetrics
 
+export type CheckArtifact = JsonCheckArtifact
+
 export interface CheckResult {
   name: string
   status: 'pass' | 'warn' | 'fail' | 'skip'
@@ -75,6 +83,7 @@ export interface CheckResult {
   output: string
   duration: number
   metrics?: CheckMetrics
+  artifacts?: CheckArtifact[]
 }
 
 export interface Check {

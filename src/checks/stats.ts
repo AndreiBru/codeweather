@@ -84,7 +84,10 @@ function buildArgs(
       if (stats.wide) base.push('-w')
       break
     case 'complexity':
-      base.push('-w', '--by-file', '-s', 'complexity')
+      if (!options.forceJson) {
+        base.push('-w')
+      }
+      base.push('--by-file', '-s', 'complexity')
       base.push('--large-line-count', String(stats.largeLineCount ?? 99999))
       break
     case 'lines':
@@ -248,9 +251,9 @@ export function parseSccLinesMetrics(
 async function extractMetrics(
   config: ResolvedConfig,
   mode: StatsMode,
-): Promise<CheckResult['metrics']> {
+): Promise<{ metrics: CheckResult['metrics']; artifacts: CheckResult['artifacts'] }> {
   if (mode === 'dry') {
-    return undefined
+    return { metrics: undefined, artifacts: undefined }
   }
 
   const metricResult = await exec('scc', buildArgs(config, mode, { forceJson: true }), {
@@ -258,18 +261,35 @@ async function extractMetrics(
   })
 
   if (metricResult.exitCode !== 0) {
-    return undefined
+    return { metrics: undefined, artifacts: undefined }
   }
+
+  const artifacts: CheckResult['artifacts'] = [
+    {
+      id: `stats-${mode}`,
+      format: 'json',
+      data: parseSccJson(metricResult.stdout) ?? [],
+    },
+  ]
 
   switch (mode) {
     case 'overview':
-      return parseSccOverviewMetrics(metricResult.stdout)
+      return {
+        metrics: parseSccOverviewMetrics(metricResult.stdout),
+        artifacts,
+      }
     case 'complexity':
-      return parseSccComplexityMetrics(metricResult.stdout, config.stats.top)
+      return {
+        metrics: parseSccComplexityMetrics(metricResult.stdout, config.stats.top),
+        artifacts,
+      }
     case 'lines':
-      return parseSccLinesMetrics(metricResult.stdout, config.stats.top)
+      return {
+        metrics: parseSccLinesMetrics(metricResult.stdout, config.stats.top),
+        artifacts,
+      }
     case 'dry':
-      return undefined
+      return { metrics: undefined, artifacts: undefined }
   }
 }
 
@@ -311,7 +331,7 @@ function createStatsCheck(mode: StatsMode, displayName: string): Check {
         output = truncateOutput(output, config.stats.top)
       }
 
-      const metrics = await extractMetrics(config, mode)
+      const { metrics, artifacts } = await extractMetrics(config, mode)
 
       return {
         name: displayName,
@@ -325,6 +345,7 @@ function createStatsCheck(mode: StatsMode, displayName: string): Check {
         output,
         duration,
         metrics,
+        artifacts,
       }
     },
   }

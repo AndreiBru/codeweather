@@ -3,7 +3,7 @@ import {
   getSnapshotStatusCounts,
   getSnapshotTrendMetrics,
 } from '../history/summary.js'
-import type { Snapshot } from '../history/types.js'
+import type { SnapshotSummary } from '../history/types.js'
 
 export type DashboardMetricKey =
   | 'lines'
@@ -20,6 +20,7 @@ export interface DashboardMetricDefinition {
 }
 
 export interface DashboardSnapshotRow {
+  id: string
   timestamp: string
   label: string
   commit: string
@@ -38,6 +39,10 @@ export interface DashboardSnapshotRow {
     duplication: number
     cycles: number
   }
+  tree: {
+    rootId: string
+    nodeCount: number
+  }
 }
 
 export const dashboardMetrics: DashboardMetricDefinition[] = [
@@ -48,10 +53,11 @@ export const dashboardMetrics: DashboardMetricDefinition[] = [
   { key: 'cycles', title: 'Cycle Count', color: '#8c2644', kind: 'number' },
 ]
 
-export function buildDashboardRows(snapshots: Snapshot[]): DashboardSnapshotRow[] {
+export function buildDashboardRows(snapshots: SnapshotSummary[]): DashboardSnapshotRow[] {
   return [...snapshots]
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
     .map((snapshot) => ({
+      id: snapshot.id,
       timestamp: snapshot.timestamp,
       label: formatSnapshotTimestamp(snapshot.timestamp),
       commit: snapshot.git?.commit ?? 'nogit',
@@ -59,5 +65,9 @@ export function buildDashboardRows(snapshots: Snapshot[]): DashboardSnapshotRow[
       dirty: snapshot.git?.dirty ?? false,
       status: getSnapshotStatusCounts(snapshot),
       metrics: getSnapshotTrendMetrics(snapshot),
+      tree: {
+        rootId: snapshot.tree.rootId,
+        nodeCount: snapshot.tree.nodeCount,
+      },
     }))
 }

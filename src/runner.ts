@@ -59,9 +59,11 @@ export async function runAll(config: ResolvedConfig): Promise<number> {
     const git = await getGitMeta(config.cwd)
     saveSnapshot({
       cwd: config.cwd,
+      src: config.src,
       historyDir: config.history.dir,
       results,
       duration,
+      report: md,
       git,
     })
 

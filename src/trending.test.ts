@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseSccComplexityMetrics, parseSccLinesMetrics, parseSccOverviewMetrics } from './checks/stats.js'
 import { parseKnipMetrics } from './checks/unused.js'
@@ -12,6 +12,7 @@ import { getGitMeta } from './history/git.js'
 import {
   createSnapshot,
   createSnapshotFilename,
+  loadSnapshotBundle,
   loadSnapshots,
   pruneSnapshots,
   saveSnapshot,
@@ -192,13 +193,14 @@ describe('tool metric parsers', () => {
 describe('history store', () => {
   it('creates snapshot filenames with sanitized timestamps', () => {
     const snapshot = createSnapshot({
+      src: 'src',
       results: [],
       duration: 100,
       git: { commit: 'abc1234', branch: 'main', dirty: false },
       timestamp: '2026-03-10T17:15:30.123Z',
     })
 
-    expect(createSnapshotFilename(snapshot)).toBe('2026-03-10T17-15-30.123Z_abc1234.json')
+    expect(createSnapshotFilename(snapshot)).toBe('2026-03-10T17-15-30.123Z_abc1234')
   })
 
   it('loads snapshots newest first', () => {
@@ -206,6 +208,7 @@ describe('history store', () => {
 
     saveSnapshot({
       cwd,
+      src: 'src',
       historyDir: '.codeweather',
       results: [],
       duration: 100,
@@ -214,6 +217,7 @@ describe('history store', () => {
     })
     saveSnapshot({
       cwd,
+      src: 'src',
       historyDir: '.codeweather',
       results: [],
       duration: 200,
@@ -238,6 +242,7 @@ describe('history store', () => {
 
     saveSnapshot({
       cwd,
+      src: 'src',
       historyDir: '.codeweather',
       results: [],
       duration: 100,
@@ -246,6 +251,7 @@ describe('history store', () => {
     })
     saveSnapshot({
       cwd,
+      src: 'src',
       historyDir: '.codeweather',
       results: [],
       duration: 100,
@@ -254,6 +260,7 @@ describe('history store', () => {
     })
     saveSnapshot({
       cwd,
+      src: 'src',
       historyDir: '.codeweather',
       results: [],
       duration: 100,
@@ -266,6 +273,195 @@ describe('history store', () => {
       'ccc3333',
       'bbb2222',
     ])
+  })
+
+  it('writes snapshot bundles with summary, report, tree, and artifacts', () => {
+    const cwd = makeTempDir()
+
+    const saved = saveSnapshot({
+      cwd,
+      src: 'src',
+      historyDir: '.codeweather',
+      duration: 125,
+      report: '# bundle report',
+      timestamp: '2026-03-10T13:00:00.000Z',
+      results: [
+        {
+          name: 'Codebase Stats',
+          status: 'pass',
+          summary: 'ok',
+          duration: 5,
+          output: '',
+          metrics: {
+            kind: 'stats-overview',
+            totalFiles: 2,
+            totalLines: 30,
+            totalCode: 20,
+            totalComplexity: 7,
+            totalBlanks: 5,
+            totalComments: 5,
+            languages: [],
+          },
+          artifacts: [
+            {
+              id: 'stats-overview',
+              format: 'json',
+              data: [{ Name: 'TypeScript', Count: 2, Lines: 30, Code: 20, Blank: 5, Comment: 5, Complexity: 7 }],
+            },
+            {
+              id: 'stats-complexity',
+              format: 'json',
+              data: [
+                {
+                  Name: 'TypeScript',
+                  Files: [
+                    { Location: 'src/a.ts', Lines: 10, Code: 7, Complexity: 3 },
+                    { Location: 'src/nested/b.ts', Lines: 20, Code: 13, Complexity: 4 },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'Unused Code',
+          status: 'warn',
+          summary: 'ok',
+          duration: 4,
+          output: '',
+          metrics: {
+            kind: 'unused',
+            unusedFiles: 1,
+            unusedExports: 1,
+            unusedTypes: 0,
+            unusedDependencies: 0,
+            totalIssues: 2,
+          },
+          artifacts: [
+            {
+              id: 'unused',
+              format: 'json',
+              data: {
+                files: ['src/unused.ts'],
+                issues: [{ file: 'src/a.ts', exports: [{ name: 'foo' }] }],
+              },
+            },
+          ],
+        },
+        {
+          name: 'Code Duplication',
+          status: 'warn',
+          summary: 'ok',
+          duration: 4,
+          output: '',
+          metrics: {
+            kind: 'duplicates',
+            totalClones: 1,
+            duplicatedLinesPercent: 2.4,
+            duplicatedTokensPercent: 3.1,
+            totalLines: 30,
+          },
+          artifacts: [
+            {
+              id: 'duplicates',
+              format: 'json',
+              data: {
+                duplicates: [
+                  {
+                    firstFile: { name: 'src/a.ts' },
+                    secondFile: { name: 'src/nested/b.ts' },
+                  },
+                ],
+                statistics: { total: { clones: 1, percentage: 2.4, percentageTokens: 3.1, lines: 30 } },
+              },
+            },
+          ],
+        },
+        {
+          name: 'Circular Dependencies',
+          status: 'warn',
+          summary: 'ok',
+          duration: 4,
+          output: '',
+          metrics: {
+            kind: 'cycles',
+            totalModules: 2,
+            totalDependencies: 2,
+            cycleCount: 1,
+          },
+          artifacts: [
+            {
+              id: 'cycles',
+              format: 'json',
+              data: {
+                modules: [
+                  {
+                    source: 'src/a.ts',
+                    dependencies: [{ resolved: 'src/nested/b.ts', circular: true }],
+                  },
+                  {
+                    source: 'src/nested/b.ts',
+                    dependencies: [{ resolved: 'src/a.ts', circular: true }],
+                  },
+                ],
+                summary: {
+                  totalCruised: 2,
+                  totalDependenciesCruised: 2,
+                  violations: [{ name: 'no-circular' }],
+                },
+              },
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(existsSync(resolve(saved.path, 'summary.json'))).toBe(true)
+    expect(existsSync(resolve(saved.path, 'report.md'))).toBe(true)
+    expect(existsSync(resolve(saved.path, 'tree.json'))).toBe(true)
+    expect(existsSync(resolve(saved.path, 'artifacts/stats-overview.json'))).toBe(true)
+    expect(existsSync(resolve(saved.path, 'artifacts/stats-complexity.json'))).toBe(true)
+    expect(existsSync(resolve(saved.path, 'artifacts/unused.json'))).toBe(true)
+    expect(existsSync(resolve(saved.path, 'artifacts/duplicates.json'))).toBe(true)
+    expect(existsSync(resolve(saved.path, 'artifacts/cycles.json'))).toBe(true)
+
+    expect(readFileSync(resolve(saved.path, 'report.md'), 'utf8')).toBe('# bundle report')
+
+    const bundle = loadSnapshotBundle(cwd, '.codeweather', saved.summary.id)
+    expect(bundle?.summary.version).toBe(2)
+    expect(bundle?.summary.tree.rootId).toBe('src')
+    expect(bundle?.summary.artifacts.map((artifact) => artifact.id)).toEqual([
+      'stats-overview',
+      'stats-complexity',
+      'unused',
+      'duplicates',
+      'cycles',
+    ])
+
+    expect(bundle?.tree.nodes['src'].stats).toEqual({
+      files: 2,
+      lines: 30,
+      code: 20,
+      complexity: 7,
+    })
+    expect(bundle?.tree.nodes['src'].issues).toEqual({
+      total: 6,
+      unused: 2,
+      duplication: 2,
+      cycles: 2,
+    })
+    expect(bundle?.tree.nodes['src/a.ts']?.issues).toEqual({
+      total: 3,
+      unused: 1,
+      duplication: 1,
+      cycles: 1,
+    })
+    expect(bundle?.tree.nodes['src/nested']?.issues).toEqual({
+      total: 2,
+      unused: 0,
+      duplication: 1,
+      cycles: 1,
+    })
   })
 })
 
@@ -360,6 +556,7 @@ describe('output helpers', () => {
     ]
 
     const previousSnapshot = createSnapshot({
+      src: 'src',
       results: [
         {
           name: 'Codebase Stats',

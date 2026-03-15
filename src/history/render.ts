@@ -1,4 +1,4 @@
-import type { Snapshot } from './types.js'
+import type { SnapshotSummary } from './types.js'
 import {
   formatSnapshotTimestamp,
   getSnapshotStatusCounts,
@@ -9,7 +9,7 @@ function pad(value: string, width: number): string {
   return value.padEnd(width)
 }
 
-function formatCommit(snapshot: Snapshot): string {
+function formatCommit(snapshot: SnapshotSummary): string {
   if (!snapshot.git) {
     return 'nogit'
   }
@@ -29,7 +29,7 @@ function formatMetricValue(value: number | undefined, kind: 'plain' | 'percent')
   return value.toLocaleString('en-US')
 }
 
-export function renderHistoryTable(snapshots: Snapshot[]): string {
+export function renderHistoryTable(snapshots: SnapshotSummary[]): string {
   if (snapshots.length === 0) {
     return 'No snapshots found.'
   }
