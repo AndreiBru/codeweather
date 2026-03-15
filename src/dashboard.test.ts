@@ -68,6 +68,28 @@ const snapshots = [
           totalDependencies: 12,
           cycleCount: 0,
         },
+        artifacts: [
+          {
+            id: 'cycles',
+            format: 'json',
+            data: {
+              modules: [
+                {
+                  source: 'src/app.ts',
+                  dependencies: [{ resolved: 'src/lib.ts', circular: false }],
+                  dependents: [],
+                  instability: 1,
+                },
+                {
+                  source: 'src/lib.ts',
+                  dependencies: [],
+                  dependents: ['src/app.ts'],
+                  instability: 0,
+                },
+              ],
+            },
+          },
+        ],
       },
     ],
   }),
@@ -135,6 +157,28 @@ const snapshots = [
           totalDependencies: 14,
           cycleCount: 1,
         },
+        artifacts: [
+          {
+            id: 'cycles',
+            format: 'json',
+            data: {
+              modules: [
+                {
+                  source: 'src/app.ts',
+                  dependencies: [{ resolved: 'src/lib.ts', circular: true }],
+                  dependents: [],
+                  instability: 1,
+                },
+                {
+                  source: 'src/lib.ts',
+                  dependencies: [],
+                  dependents: ['src/app.ts'],
+                  instability: 0,
+                },
+              ],
+            },
+          },
+        ],
       },
     ],
   }),
@@ -171,6 +215,7 @@ describe('dashboard rendering', () => {
             childIds: [],
             stats: { files: 1, lines: 120, code: 90, complexity: 24 },
             issues: { total: 3, unused: 2, duplication: 1, cycles: 0 },
+            dependency: { dependencies: 1, dependents: 0, instability: 1, inCycle: true },
           },
         },
       },
@@ -181,8 +226,11 @@ describe('dashboard rendering', () => {
     expect(html).toContain('new Chart')
     expect(html).toContain('range-controls')
     expect(html).toContain('Hide Table')
+    expect(html).toContain('Dependency Instability')
+    expect(html).toContain('Stable Highly-Depended-On Files')
     expect(html).toContain('Prototype Explorer')
     expect(html).toContain('Codebase Tree')
     expect(html).toContain('app.ts')
+    expect(html).toContain('Dependents')
   })
 })

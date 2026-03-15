@@ -264,5 +264,19 @@ describe('check behavior', () => {
 
     expect(result.status).toBe('warn')
     expect(result.metrics?.kind).toBe('cycles')
+    expect(result.artifacts).toEqual([
+      {
+        id: 'cycles',
+        format: 'json',
+        data: {
+          modules: [{ dependencies: [{ circular: true }] }],
+          summary: {
+            totalCruised: 4,
+            totalDependenciesCruised: 6,
+            violations: [{ name: 'no-circular' }],
+          },
+        },
+      },
+    ])
   })
 })

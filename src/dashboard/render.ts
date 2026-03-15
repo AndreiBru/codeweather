@@ -207,6 +207,71 @@ export function renderDashboardHtml(
       padding: 18px;
     }
 
+    .insights-panel {
+      margin-top: 16px;
+      padding: 18px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .insight-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+    }
+
+    .insight-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .insight-card {
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .insight-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .insight-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 14px;
+      background: rgba(18, 110, 82, 0.06);
+    }
+
+    .insight-row strong {
+      white-space: nowrap;
+      font-size: 1rem;
+    }
+
+    .insight-path {
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    .insight-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .insight-empty {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
     .tree-panel {
       margin-top: 16px;
       padding: 18px;
@@ -490,6 +555,14 @@ export function renderDashboardHtml(
       <div class="grid" id="charts-grid"></div>
     </section>
 
+    <section class="panel insights-panel">
+      <div>
+        <div class="eyebrow">Dependency-Cruiser</div>
+        <h2>Dependency Instability</h2>
+      </div>
+      <div id="instability-panel"></div>
+    </section>
+
     <section class="panel tree-panel">
       <div class="tree-header">
         <div>
@@ -539,6 +612,7 @@ export function renderDashboardHtml(
 
     const formatNumber = (value) => value == null ? '—' : Number(value).toLocaleString('en-US');
     const formatPercent = (value) => value == null ? '—' : Number(value).toFixed(1) + '%';
+    const formatInstability = (value) => value == null ? '—' : (Number(value) * 100).toFixed(1) + '%';
     const formatMetric = (metric, value) => metric.kind === 'percent' ? formatPercent(value) : formatNumber(value);
     const escapeHtml = (value) => value
       .replaceAll('&', '&amp;')
@@ -689,6 +763,78 @@ export function renderDashboardHtml(
       });
     }
 
+    function renderInsightList(entries, primaryMetric) {
+      if (!entries?.length) {
+        return '<div class="insight-empty">No files matched this ranking.</div>';
+      }
+
+      return '<div class="insight-list">' + entries.map((entry) => {
+        const primaryValue = primaryMetric === 'instability'
+          ? formatInstability(entry.instability)
+          : formatNumber(entry.dependents);
+
+        return \`
+          <div class="insight-row">
+            <div>
+              <div class="insight-path">\${escapeHtml(entry.path)}</div>
+              <div class="insight-meta">
+                Dependencies \${formatNumber(entry.dependencies)} ·
+                Dependents \${formatNumber(entry.dependents)} ·
+                In cycle \${entry.inCycle ? 'Yes' : 'No'}
+              </div>
+            </div>
+            <strong>\${primaryValue}</strong>
+          </div>
+        \`;
+      }).join('') + '</div>';
+    }
+
+    function renderInstability(rows) {
+      const panel = document.getElementById('instability-panel');
+      const latest = rows.at(-1);
+      const instability = latest?.instability;
+
+      if (!instability) {
+        panel.innerHTML = '<article class="mini-card">No dependency instability data available for the selected range.</article>';
+        return;
+      }
+
+      panel.innerHTML = \`
+        <div class="insight-summary">
+          <article class="mini-card">
+            <div class="eyebrow">Files Analyzed</div>
+            <strong>\${formatNumber(instability.summary.totalFiles)}</strong>
+          </article>
+          <article class="mini-card">
+            <div class="eyebrow">Files In Cycles</div>
+            <strong>\${formatNumber(instability.summary.filesInCycles)}</strong>
+          </article>
+          <article class="mini-card">
+            <div class="eyebrow">Average Instability</div>
+            <strong>\${formatInstability(instability.summary.averageInstability)}</strong>
+          </article>
+          <article class="mini-card">
+            <div class="eyebrow">Highest Dependencies</div>
+            <strong>\${formatNumber(instability.summary.highestDependencies)}</strong>
+          </article>
+          <article class="mini-card">
+            <div class="eyebrow">Highest Dependents</div>
+            <strong>\${formatNumber(instability.summary.highestDependents)}</strong>
+          </article>
+        </div>
+        <div class="insight-grid">
+          <article class="insight-card">
+            <h3>Highly Unstable Files</h3>
+            \${renderInsightList(instability.highlyUnstableFiles, 'instability')}
+          </article>
+          <article class="insight-card">
+            <h3>Stable Highly-Depended-On Files</h3>
+            \${renderInsightList(instability.stableHighlyDependedOnFiles, 'dependents')}
+          </article>
+        </div>
+      \`;
+    }
+
     function getTreeSnapshot(rows) {
       const latest = rows.at(-1);
       if (!latest) return undefined;
@@ -814,6 +960,17 @@ export function renderDashboardHtml(
             <div>Children: \${formatNumber(node.childIds.length)}</div>
           </div>
         </div>
+        \${node.kind === 'file' && node.dependency ? \`
+          <div>
+            <h4>Dependency Instability</h4>
+            <div class="tree-detail-list">
+              <div>Dependencies: \${formatNumber(node.dependency.dependencies)}</div>
+              <div>Dependents: \${formatNumber(node.dependency.dependents)}</div>
+              <div>Instability: \${formatInstability(node.dependency.instability)}</div>
+              <div>In cycle: \${node.dependency.inCycle ? 'Yes' : 'No'}</div>
+            </div>
+          </div>
+        \` : ''}
       \`;
     }
 
@@ -875,6 +1032,7 @@ export function renderDashboardHtml(
       renderHero(rows);
       renderSummaryCards(rows);
       renderCharts(rows);
+      renderInstability(rows);
       renderTree(rows);
       renderTable(rows);
     }

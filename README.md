@@ -30,9 +30,11 @@ That's it. codeweather auto-detects your `src` directory, file extensions, and t
 | **Top File Size** | Largest files by line count |
 | **Unused Code** | Dead exports, unused files, unlisted dependencies |
 | **Duplicates** | Copy-pasted code blocks across your codebase |
-| **Circular Deps** | Import cycles that can cause subtle bugs |
+| **Circular Deps** | Import cycles plus file-level dependency instability insights from dependency-cruiser |
 
-A markdown report is saved to `codeweather-report.md` after every run. Full runs also store structured snapshots in `.codeweather/snapshots/` so you can track trends over time.
+A markdown report is saved to `codeweather-report.md` after every run. It now includes a `Dependency Instability` section with ranked file-level `dependencies`, `dependents`, `instability`, and cycle participation.
+
+Full runs also store structured snapshots in `.codeweather/snapshots/` so you can track trends over time. Each snapshot persists dependency-cruiser's raw JSON as `artifacts/cycles.json`, then derives Codeweather's report and dashboard views from that artifact.
 
 ### Recommended first config
 
@@ -121,11 +123,20 @@ Both are optional — if missing, the relevant check is skipped with an install 
 Once you have at least one full run, codeweather becomes a trend tracker:
 
 - `codeweather history` prints a terminal-friendly table with timestamp, commit, status counts, and key trend metrics.
-- `codeweather dashboard` generates `.codeweather/dashboard.html`, a self-contained dashboard with Chart.js line charts, range controls, and a snapshot table.
+- `codeweather dashboard` generates `.codeweather/dashboard.html`, a self-contained dashboard with Chart.js line charts, range controls, a dependency instability panel, a tree explorer, and a snapshot table.
 - `codeweather dashboard --output <path>` writes the dashboard to a specific location for CI artifacts or docs publishing.
+- The dashboard's instability panel shows a compact summary plus ranked `Highly Unstable Files` and `Stable Highly-Depended-On Files` lists from dependency-cruiser data.
+- Selecting a file in the tree explorer shows its `dependencies`, `dependents`, `instability`, and whether it participates in a cycle.
 - The terminal summary prints a one-line trend comparison against the previous snapshot when available.
 - Use `--no-history` for one-off runs you do not want recorded.
 - Add `.codeweather/` to your project's `.gitignore` so routine runs do not dirty your worktree.
+
+### Snapshot format
+
+Snapshots currently use version `3`.
+
+- Older snapshot history is not loaded.
+- If you have pre-v3 snapshots, regenerate your history with fresh full runs.
 
 ## Configuration
 
@@ -266,7 +277,7 @@ export default {
     exclude: undefined,                   // Regex: exclude matching modules
     doNotFollow: undefined,               // Regex: include but don't traverse
     severity: 'error',                    // Severity for circular deps: error, warn, info
-    metrics: false,                       // Calculate stability metrics
+    metrics: false,                       // Include depcruise metrics in the main CLI output
     cache: false,                         // Enable caching
     args: [],                             // Extra CLI args passed directly to depcruise
   },
@@ -328,7 +339,7 @@ codeweather is a thin orchestration layer over these excellent tools:
 | [scc](https://github.com/boyter/scc) | Ben Boyter | Fast code counter — lines, complexity, language stats, DRYness | MIT |
 | [knip](https://knip.dev) | Lars Kappert | Find unused files, exports, and dependencies | ISC |
 | [jscpd](https://github.com/kucherenko/jscpd) | Andrey Kucherenko | Copy-paste / code duplication detection | MIT |
-| [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) | Sander Verweij | Dependency analysis, circular dep detection, graph generation | MIT |
+| [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) | Sander Verweij | Dependency analysis, circular dep detection, instability metrics, graph generation | MIT |
 | [Graphviz](https://graphviz.org/) | AT&T / open source | Graph visualization (DOT → SVG rendering) | EPL |
 
 Also built with: [citty](https://github.com/unjs/citty) (CLI), [Chart.js](https://www.chartjs.org/) (dashboard charts), [execa](https://github.com/sindresorhus/execa) (process exec), [picocolors](https://github.com/alexeyraspopov/picocolors) (terminal colors), [lilconfig](https://github.com/antonk52/lilconfig) (config loading), [tsup](https://github.com/egoist/tsup) (bundling).

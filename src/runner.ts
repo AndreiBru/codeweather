@@ -49,7 +49,7 @@ export async function runAll(config: ResolvedConfig): Promise<number> {
   }
 
   const trendLine = previousSnapshot ? getTrendLine(results, previousSnapshot) : undefined
-  const md = toMarkdown(results, { trendLine })
+  const md = toMarkdown(results, { trendLine, top: config.top })
   const outPath = resolve(config.cwd, 'codeweather-report.md')
   writeFileSync(outPath, md)
 
@@ -62,6 +62,7 @@ export async function runAll(config: ResolvedConfig): Promise<number> {
       src: config.src,
       historyDir: config.history.dir,
       results,
+      top: config.top,
       duration,
       report: md,
       git,

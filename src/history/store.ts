@@ -8,6 +8,10 @@ import {
 } from 'node:fs'
 import { resolve } from 'node:path'
 import type { CheckResult } from '../checks/types.js'
+import {
+  deriveDependencyInstability,
+  type DependencyInstabilityView,
+} from '../checks/depcruise.js'
 import { buildSnapshotArtifactMap, buildSnapshotTreeIndex } from './tree.js'
 import type {
   SnapshotArtifactMeta,
@@ -21,6 +25,7 @@ export interface SaveSnapshotBundleOptions {
   src?: string
   historyDir: string
   results: CheckResult[]
+  top?: number
   duration: number
   report?: string
   git?: SnapshotGitMeta
@@ -50,8 +55,22 @@ function createSnapshotArtifactMeta(results: CheckResult[]): SnapshotArtifactMet
   })))
 }
 
+function collectArtifactData(results: CheckResult[]): Record<string, unknown> {
+  return Object.fromEntries(
+    results.flatMap((result) => (result.artifacts ?? []).map((artifact) => [artifact.id, artifact.data])),
+  )
+}
+
+function deriveSnapshotInstability(
+  artifactData: Record<string, unknown>,
+  top: number | undefined,
+): DependencyInstabilityView | undefined {
+  return deriveDependencyInstability(artifactData.cycles, top ?? 25)
+}
+
 export function createSnapshotSummary({
   results,
+  top,
   duration,
   git,
   timestamp,
@@ -61,17 +80,17 @@ export function createSnapshotSummary({
   const createdAt = timestamp ?? new Date().toISOString()
   const id = createSnapshotId(createdAt, git)
   const artifacts = createSnapshotArtifactMeta(results)
-  const artifactData = Object.fromEntries(
-    results.flatMap((result) => (result.artifacts ?? []).map((artifact) => [artifact.id, artifact.data])),
-  )
+  const artifactData = collectArtifactData(results)
+  const instability = deriveSnapshotInstability(artifactData, top)
   const tree = buildSnapshotTreeIndex({
     cwd: '.',
     src: sourceRoot,
     artifacts: buildSnapshotArtifactMap(artifacts, artifactData),
+    dependencyInstability: instability,
   })
 
   return {
-    version: 2,
+    version: 3,
     id,
     timestamp: createdAt,
     git,
@@ -89,6 +108,11 @@ export function createSnapshotSummary({
       rootId: tree.rootId,
       nodeCount: Object.keys(tree.nodes).length,
     },
+    instability: instability && {
+      summary: instability.summary,
+      highlyUnstableFiles: instability.highlyUnstableFiles,
+      stableHighlyDependedOnFiles: instability.stableHighlyDependedOnFiles,
+    },
   }
 }
 
@@ -102,19 +126,19 @@ export function saveSnapshotBundle(options: SaveSnapshotBundleOptions): { summar
   mkdirSync(snapshotRootDir, { recursive: true })
 
   const artifacts = createSnapshotArtifactMeta(options.results)
-  const artifactData = Object.fromEntries(
-    options.results.flatMap((result) => (result.artifacts ?? []).map((artifact) => [artifact.id, artifact.data])),
-  )
+  const artifactData = collectArtifactData(options.results)
+  const instability = deriveSnapshotInstability(artifactData, options.top)
   const tree = buildSnapshotTreeIndex({
     cwd: options.cwd,
     src: sourceRoot,
     artifacts: buildSnapshotArtifactMap(artifacts, artifactData),
+    dependencyInstability: instability,
   })
 
   const createdAt = options.timestamp ?? new Date().toISOString()
   const id = createSnapshotId(createdAt, options.git)
   const summary: SnapshotSummary = {
-    version: 2,
+    version: 3,
     id,
     timestamp: createdAt,
     git: options.git,
@@ -131,6 +155,11 @@ export function saveSnapshotBundle(options: SaveSnapshotBundleOptions): { summar
       path: tree.rootId,
       rootId: tree.rootId,
       nodeCount: Object.keys(tree.nodes).length,
+    },
+    instability: instability && {
+      summary: instability.summary,
+      highlyUnstableFiles: instability.highlyUnstableFiles,
+      stableHighlyDependedOnFiles: instability.stableHighlyDependedOnFiles,
     },
   }
 
@@ -165,7 +194,11 @@ export function loadSnapshotSummaries(
   for (const name of selected) {
     try {
       const raw = readFileSync(resolve(snapshotDir, name, 'summary.json'), 'utf8')
-      snapshots.push(JSON.parse(raw) as SnapshotSummary)
+      const summary = JSON.parse(raw) as SnapshotSummary
+      if (summary.version !== 3) {
+        continue
+      }
+      snapshots.push(summary)
     } catch {
       // Ignore malformed snapshots instead of breaking the run.
     }
@@ -193,6 +226,9 @@ export function loadSnapshotBundle(
 
   try {
     const summary = JSON.parse(readFileSync(resolve(bundleDir, 'summary.json'), 'utf8')) as SnapshotSummary
+    if (summary.version !== 3) {
+      return undefined
+    }
     const report = readFileSync(resolve(bundleDir, 'report.md'), 'utf8')
     const tree = JSON.parse(readFileSync(resolve(bundleDir, 'tree.json'), 'utf8')) as SnapshotBundle['tree']
     const artifacts = Object.fromEntries(summary.artifacts.map((artifact) => ([

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { parseSccComplexityMetrics, parseSccLinesMetrics, parseSccOverviewMetrics } from './checks/stats.js'
 import { parseKnipMetrics } from './checks/unused.js'
 import { parseJscpdMetrics } from './checks/duplicates.js'
-import { parseDepCruiseMetrics } from './checks/cycles.js'
+import { deriveDependencyInstability, parseDepCruiseMetrics } from './checks/depcruise.js'
 import type { CheckResult } from './checks/types.js'
 import { getTrendLine, toJson, toMarkdown } from './output.js'
 import { getGitMeta } from './history/git.js'
@@ -186,6 +186,99 @@ describe('tool metric parsers', () => {
       totalModules: 10,
       totalDependencies: 24,
       cycleCount: 2,
+    })
+  })
+
+  it('derives file-level instability insights from depcruise json', () => {
+    const view = deriveDependencyInstability({
+      modules: [
+        {
+          source: 'src/app.ts',
+          dependencies: [
+            { resolved: 'src/lib.ts', circular: false },
+            { resolved: 'src/ui.ts', circular: true },
+          ],
+          dependents: [],
+          instability: 1,
+        },
+        {
+          source: 'src/lib.ts',
+          dependencies: [],
+          dependents: ['src/app.ts', 'src/ui.ts'],
+          instability: 0,
+        },
+        {
+          source: 'src/ui.ts',
+          dependencies: [{ resolved: 'src/lib.ts', circular: true }],
+          dependents: ['src/app.ts'],
+          instability: 0.5,
+        },
+      ],
+    }, 2)
+
+    expect(view).toEqual({
+      summary: {
+        totalFiles: 3,
+        filesInCycles: 2,
+        averageInstability: 0.5,
+        highestDependencies: 2,
+        highestDependents: 2,
+      },
+      byFile: [
+        {
+          path: 'src/app.ts',
+          dependencies: 2,
+          dependents: 0,
+          instability: 1,
+          inCycle: true,
+        },
+        {
+          path: 'src/lib.ts',
+          dependencies: 0,
+          dependents: 2,
+          instability: 0,
+          inCycle: false,
+        },
+        {
+          path: 'src/ui.ts',
+          dependencies: 1,
+          dependents: 1,
+          instability: 0.5,
+          inCycle: true,
+        },
+      ],
+      highlyUnstableFiles: [
+        {
+          path: 'src/app.ts',
+          dependencies: 2,
+          dependents: 0,
+          instability: 1,
+          inCycle: true,
+        },
+        {
+          path: 'src/ui.ts',
+          dependencies: 1,
+          dependents: 1,
+          instability: 0.5,
+          inCycle: true,
+        },
+      ],
+      stableHighlyDependedOnFiles: [
+        {
+          path: 'src/lib.ts',
+          dependencies: 0,
+          dependents: 2,
+          instability: 0,
+          inCycle: false,
+        },
+        {
+          path: 'src/ui.ts',
+          dependencies: 1,
+          dependents: 1,
+          instability: 0.5,
+          inCycle: true,
+        },
+      ],
     })
   })
 })
@@ -398,10 +491,14 @@ describe('history store', () => {
                   {
                     source: 'src/a.ts',
                     dependencies: [{ resolved: 'src/nested/b.ts', circular: true }],
+                    dependents: ['src/nested/b.ts'],
+                    instability: 0.5,
                   },
                   {
                     source: 'src/nested/b.ts',
                     dependencies: [{ resolved: 'src/a.ts', circular: true }],
+                    dependents: ['src/a.ts'],
+                    instability: 0.5,
                   },
                 ],
                 summary: {
@@ -428,7 +525,7 @@ describe('history store', () => {
     expect(readFileSync(resolve(saved.path, 'report.md'), 'utf8')).toBe('# bundle report')
 
     const bundle = loadSnapshotBundle(cwd, '.codeweather', saved.summary.id)
-    expect(bundle?.summary.version).toBe(2)
+    expect(bundle?.summary.version).toBe(3)
     expect(bundle?.summary.tree.rootId).toBe('src')
     expect(bundle?.summary.artifacts.map((artifact) => artifact.id)).toEqual([
       'stats-overview',
@@ -456,11 +553,58 @@ describe('history store', () => {
       duplication: 1,
       cycles: 1,
     })
+    expect(bundle?.tree.nodes['src/a.ts']?.dependency).toEqual({
+      dependencies: 1,
+      dependents: 1,
+      instability: 0.5,
+      inCycle: true,
+    })
     expect(bundle?.tree.nodes['src/nested']?.issues).toEqual({
       total: 2,
       unused: 0,
       duplication: 1,
       cycles: 1,
+    })
+    expect(bundle?.summary.instability).toEqual({
+      summary: {
+        totalFiles: 2,
+        filesInCycles: 2,
+        averageInstability: 0.5,
+        highestDependencies: 1,
+        highestDependents: 1,
+      },
+      highlyUnstableFiles: [
+        {
+          path: 'src/a.ts',
+          dependencies: 1,
+          dependents: 1,
+          instability: 0.5,
+          inCycle: true,
+        },
+        {
+          path: 'src/nested/b.ts',
+          dependencies: 1,
+          dependents: 1,
+          instability: 0.5,
+          inCycle: true,
+        },
+      ],
+      stableHighlyDependedOnFiles: [
+        {
+          path: 'src/a.ts',
+          dependencies: 1,
+          dependents: 1,
+          instability: 0.5,
+          inCycle: true,
+        },
+        {
+          path: 'src/nested/b.ts',
+          dependencies: 1,
+          dependents: 1,
+          instability: 0.5,
+          inCycle: true,
+        },
+      ],
     })
   })
 })
@@ -633,5 +777,45 @@ describe('output helpers', () => {
     })
 
     expect(markdown).toContain('> Trend: Lines 100 (+5) · Complexity 10 (=)')
+  })
+
+  it('renders dependency instability rankings in markdown from depcruise artifacts', () => {
+    const markdown = toMarkdown([
+      {
+        name: 'Circular Dependencies',
+        status: 'warn',
+        summary: 'ok',
+        duration: 1,
+        output: '',
+        artifacts: [
+          {
+            id: 'cycles',
+            format: 'json',
+            data: {
+              modules: [
+                {
+                  source: 'src/app.ts',
+                  dependencies: [{ resolved: 'src/lib.ts', circular: true }],
+                  dependents: [],
+                  instability: 1,
+                },
+                {
+                  source: 'src/lib.ts',
+                  dependencies: [],
+                  dependents: ['src/app.ts'],
+                  instability: 0,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ], { top: 5 })
+
+    expect(markdown).toContain('## Dependency Instability')
+    expect(markdown).toContain('Highly Unstable Files')
+    expect(markdown).toContain('Stable Highly-Depended-On Files')
+    expect(markdown).toContain('`src/app.ts`')
+    expect(markdown).toContain('100.0%')
   })
 })

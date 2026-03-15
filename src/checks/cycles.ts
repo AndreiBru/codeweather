@@ -1,31 +1,13 @@
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import type { Check, CheckResult, CyclesMetrics } from './types.js'
+import type { Check, CheckResult } from './types.js'
 import type { ResolvedConfig } from '../config.js'
+import {
+  parseDepCruiseMetrics,
+  type DepCruiseJsonResult,
+} from './depcruise.js'
 import { exec, ownBin } from '../utils/exec.js'
 import { stripFlagPairs } from '../utils/args.js'
-
-interface DepCruiseDependency {
-  module?: string
-  resolved?: string
-  circular?: boolean
-}
-
-interface DepCruiseModule {
-  source?: string
-  dependencies?: DepCruiseDependency[]
-}
-
-interface DepCruiseSummary {
-  totalCruised?: number
-  totalDependenciesCruised?: number
-  violations?: unknown
-}
-
-interface DepCruiseJsonResult {
-  modules?: DepCruiseModule[]
-  summary?: DepCruiseSummary
-}
 
 function generateDepCruiserConfig(
   tsConfig: string | undefined,
@@ -89,42 +71,6 @@ function buildArgs(
 
   args.push(...extraArgs)
   return args
-}
-
-function countNestedEntries(value: unknown): number {
-  if (Array.isArray(value)) {
-    return value.length
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.values(value).reduce((sum, entry) => sum + countNestedEntries(entry), 0)
-  }
-
-  return 0
-}
-
-export function parseDepCruiseMetrics(output: string): CyclesMetrics | undefined {
-  try {
-    const parsed = JSON.parse(output) as DepCruiseJsonResult
-    const summary = parsed.summary
-    if (!summary) {
-      return undefined
-    }
-
-    const violationCount = countNestedEntries(summary.violations)
-    const circularEdges = (parsed.modules ?? []).reduce((sum, moduleEntry) => (
-      sum + (moduleEntry.dependencies ?? []).filter((dependency) => dependency.circular).length
-    ), 0)
-
-    return {
-      kind: 'cycles',
-      totalModules: summary.totalCruised ?? 0,
-      totalDependencies: summary.totalDependenciesCruised ?? 0,
-      cycleCount: violationCount || circularEdges,
-    }
-  } catch {
-    return undefined
-  }
 }
 
 async function extractMetrics(

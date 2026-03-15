@@ -1,4 +1,5 @@
 import { basename, relative } from 'node:path'
+import type { DependencyInstabilityView } from '../checks/depcruise.js'
 import type { SnapshotArtifactMeta, SnapshotTreeIndex, SnapshotTreeNode } from './types.js'
 
 interface SccFileEntry {
@@ -282,6 +283,7 @@ export function buildSnapshotTreeIndex(options: {
   cwd: string
   src: string
   artifacts: Record<string, unknown>
+  dependencyInstability?: DependencyInstabilityView
 }): SnapshotTreeIndex {
   const rootCandidate = normalizePath(options.src)
   const rootId = rootCandidate.length > 0 ? rootCandidate : '.'
@@ -373,6 +375,21 @@ export function buildSnapshotTreeIndex(options: {
 
   for (const [filePath, count] of extractCycleFileCounts(options.artifacts.cycles)) {
     applyIssueCount(filePath, 'cycles', count)
+  }
+
+  for (const entry of options.dependencyInstability?.byFile ?? []) {
+    const repoPath = normalizeRepoPath(options.cwd, entry.path)
+    if (!repoPath || !isWithinRoot(repoPath, rootId)) {
+      continue
+    }
+
+    const node = ensureNode(repoPath, 'file')
+    node.dependency = {
+      dependencies: entry.dependencies,
+      dependents: entry.dependents,
+      instability: entry.instability,
+      inCycle: entry.inCycle,
+    }
   }
 
   sortChildIds(nodes)

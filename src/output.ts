@@ -1,4 +1,5 @@
 import pc from 'picocolors'
+import { deriveDependencyInstability, type DependencyInstabilityView } from './checks/depcruise.js'
 import type {
   CheckResult,
   CyclesMetrics,
@@ -74,6 +75,10 @@ function formatNumber(value: number): string {
 
 function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`
+}
+
+function formatInstability(value: number): string {
+  return formatPercent(value * 100)
 }
 
 function formatDelta(value: number, options: { decimals?: number } = {}): string {
@@ -175,12 +180,48 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1B\[[0-9;]*m/g, '')
 }
 
+function findArtifactData(results: CheckResult[], id: string): unknown {
+  for (const result of results) {
+    const artifact = result.artifacts?.find((entry) => entry.id === id)
+    if (artifact) {
+      return artifact.data
+    }
+  }
+
+  return undefined
+}
+
+function pushInstabilityTable(
+  lines: string[],
+  title: string,
+  entries: DependencyInstabilityView['highlyUnstableFiles'],
+): void {
+  lines.push(`### ${title}`)
+  lines.push('')
+
+  if (entries.length === 0) {
+    lines.push('_No files matched this ranking._')
+    lines.push('')
+    return
+  }
+
+  lines.push('| File | Dependencies | Dependents | Instability | In Cycle |')
+  lines.push('|------|--------------|------------|-------------|----------|')
+  for (const entry of entries) {
+    lines.push(
+      `| \`${entry.path}\` | ${formatNumber(entry.dependencies)} | ${formatNumber(entry.dependents)} | ${formatInstability(entry.instability)} | ${entry.inCycle ? 'Yes' : 'No'} |`,
+    )
+  }
+  lines.push('')
+}
+
 export function toMarkdown(
   results: CheckResult[],
-  options: { trendLine?: string } = {},
+  options: { trendLine?: string; top?: number } = {},
 ): string {
   const now = new Date()
   const timestamp = now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')
+  const instability = deriveDependencyInstability(findArtifactData(results, 'cycles'), options.top ?? 25)
 
   const lines: string[] = []
   lines.push('# Codeweather Report')
@@ -212,6 +253,24 @@ export function toMarkdown(
     lines.push(`> Trend: ${options.trendLine}`)
     lines.push('')
   }
+
+  if (instability) {
+    lines.push('## Dependency Instability')
+    lines.push('')
+    lines.push(
+      [
+        `Files analyzed: **${formatNumber(instability.summary.totalFiles)}**`,
+        `Files in cycles: **${formatNumber(instability.summary.filesInCycles)}**`,
+        `Average instability: **${formatInstability(instability.summary.averageInstability)}**`,
+        `Highest dependencies: **${formatNumber(instability.summary.highestDependencies)}**`,
+        `Highest dependents: **${formatNumber(instability.summary.highestDependents)}**`,
+      ].join(' · '),
+    )
+    lines.push('')
+    pushInstabilityTable(lines, 'Highly Unstable Files', instability.highlyUnstableFiles)
+    pushInstabilityTable(lines, 'Stable Highly-Depended-On Files', instability.stableHighlyDependedOnFiles)
+  }
+
   lines.push('---')
   lines.push('')
 

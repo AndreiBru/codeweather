@@ -3,7 +3,7 @@ import {
   getSnapshotStatusCounts,
   getSnapshotTrendMetrics,
 } from '../history/summary.js'
-import type { SnapshotSummary } from '../history/types.js'
+import type { SnapshotInstability, SnapshotSummary } from '../history/types.js'
 
 export type DashboardMetricKey =
   | 'lines'
@@ -43,6 +43,7 @@ export interface DashboardSnapshotRow {
     rootId: string
     nodeCount: number
   }
+  instability?: SnapshotInstability
 }
 
 export const dashboardMetrics: DashboardMetricDefinition[] = [
@@ -69,5 +70,6 @@ export function buildDashboardRows(snapshots: SnapshotSummary[]): DashboardSnaps
         rootId: snapshot.tree.rootId,
         nodeCount: snapshot.tree.nodeCount,
       },
+      instability: snapshot.instability,
     }))
 }

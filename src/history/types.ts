@@ -36,6 +36,13 @@ export interface SnapshotTreeNodeIssues {
   cycles: number
 }
 
+export interface SnapshotTreeNodeDependency {
+  dependencies: number
+  dependents: number
+  instability: number
+  inCycle: boolean
+}
+
 export interface SnapshotTreeNode {
   path: string
   name: string
@@ -43,6 +50,7 @@ export interface SnapshotTreeNode {
   childIds: string[]
   stats: SnapshotTreeNodeStats
   issues: SnapshotTreeNodeIssues
+  dependency?: SnapshotTreeNodeDependency
 }
 
 export interface SnapshotTreeIndex {
@@ -56,8 +64,30 @@ export interface SnapshotTreeMeta {
   nodeCount: number
 }
 
+export interface SnapshotInstabilityFile {
+  path: string
+  dependencies: number
+  dependents: number
+  instability: number
+  inCycle: boolean
+}
+
+export interface SnapshotInstabilitySummary {
+  totalFiles: number
+  filesInCycles: number
+  averageInstability: number
+  highestDependencies: number
+  highestDependents: number
+}
+
+export interface SnapshotInstability {
+  summary: SnapshotInstabilitySummary
+  highlyUnstableFiles: SnapshotInstabilityFile[]
+  stableHighlyDependedOnFiles: SnapshotInstabilityFile[]
+}
+
 export interface SnapshotSummary {
-  version: 2
+  version: 3
   id: string
   timestamp: string
   git?: SnapshotGitMeta
@@ -65,6 +95,7 @@ export interface SnapshotSummary {
   checks: SnapshotCheckSummary[]
   artifacts: SnapshotArtifactMeta[]
   tree: SnapshotTreeMeta
+  instability?: SnapshotInstability
 }
 
 export interface SnapshotBundle {
