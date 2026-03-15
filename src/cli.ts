@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { defineCommand, runMain } from 'citty'
+import { runBackfill } from './backfill.js'
 import { loadConfig, type ResolvedConfig } from './config.js'
 import { runAll } from './runner.js'
 import { printResult, toJson } from './output.js'
@@ -244,6 +245,44 @@ const dashboardCommand = defineCommand({
   },
 })
 
+const backfillCommand = defineCommand({
+  meta: {
+    name: 'backfill',
+    description: 'Backfill snapshot history from earlier first-parent commits',
+  },
+  args: {
+    src: globalArgs.src,
+    config: globalArgs.config,
+    top: globalArgs.top,
+    count: {
+      type: 'string' as const,
+      description: 'Number of snapshots to create',
+      required: true,
+    },
+    every: {
+      type: 'string' as const,
+      description: 'Commit interval between snapshots',
+      required: true,
+    },
+  },
+  async run({ args }) {
+    try {
+      const exitCode = await runBackfill(process.cwd(), {
+        src: args.src as string | undefined,
+        config: args.config as string | undefined,
+        top: args.top ? Number(args.top) : undefined,
+        count: Number(args.count),
+        every: Number(args.every),
+      })
+      process.exit(exitCode)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(message)
+      process.exit(1)
+    }
+  },
+})
+
 const main = defineCommand({
   meta: {
     name: 'codeweather',
@@ -260,6 +299,7 @@ const main = defineCommand({
     graph: graphCommand,
     history: historyCommand,
     dashboard: dashboardCommand,
+    backfill: backfillCommand,
   },
   async run({ args }) {
     const config = await resolveConfig(args)

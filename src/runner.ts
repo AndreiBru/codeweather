@@ -16,6 +16,7 @@ import {
 } from './output.js'
 import { getGitMeta } from './history/git.js'
 import { loadLatestSnapshot, pruneSnapshots, saveSnapshot } from './history/store.js'
+import type { SnapshotGitMeta, SnapshotSummary } from './history/types.js'
 
 const defaultChecks: Check[] = [
   statsOverview,
@@ -26,11 +27,26 @@ const defaultChecks: Check[] = [
   cyclesCheck,
 ]
 
-export async function runAll(config: ResolvedConfig): Promise<number> {
+export interface RunAllOptions {
+  outputCwd?: string
+  previousSnapshot?: SnapshotSummary | null
+  snapshotGit?: SnapshotGitMeta
+  snapshotTimestamp?: string
+  writeRootReport?: boolean
+  printDelta?: boolean
+}
+
+export async function runAll(
+  config: ResolvedConfig,
+  options: RunAllOptions = {},
+): Promise<number> {
   const runStart = Date.now()
   const results: CheckResult[] = []
+  const outputCwd = options.outputCwd ?? config.cwd
   const previousSnapshot = config.history.enabled
-    ? loadLatestSnapshot(config.cwd, config.history.dir)
+    ? options.previousSnapshot === undefined
+      ? loadLatestSnapshot(outputCwd, config.history.dir)
+      : (options.previousSnapshot ?? undefined)
     : undefined
 
   for (const check of defaultChecks) {
@@ -50,15 +66,18 @@ export async function runAll(config: ResolvedConfig): Promise<number> {
 
   const trendLine = previousSnapshot ? getTrendLine(results, previousSnapshot) : undefined
   const md = toMarkdown(results, { trendLine, top: config.top })
-  const outPath = resolve(config.cwd, 'codeweather-report.md')
-  writeFileSync(outPath, md)
+  const shouldWriteRootReport = options.writeRootReport ?? true
+  const outPath = resolve(outputCwd, 'codeweather-report.md')
+  if (shouldWriteRootReport) {
+    writeFileSync(outPath, md)
+  }
 
   const duration = Date.now() - runStart
 
   if (config.history.enabled) {
-    const git = await getGitMeta(config.cwd)
+    const git = options.snapshotGit ?? await getGitMeta(config.cwd)
     saveSnapshot({
-      cwd: config.cwd,
+      cwd: outputCwd,
       src: config.src,
       historyDir: config.history.dir,
       results,
@@ -66,18 +85,19 @@ export async function runAll(config: ResolvedConfig): Promise<number> {
       duration,
       report: md,
       git,
+      timestamp: options.snapshotTimestamp,
     })
 
     if (config.history.maxSnapshots != null) {
-      pruneSnapshots(config.cwd, config.history.dir, config.history.maxSnapshots)
+      pruneSnapshots(outputCwd, config.history.dir, config.history.maxSnapshots)
     }
   }
 
-  if (!config.json && previousSnapshot) {
+  if (!config.json && previousSnapshot && (options.printDelta ?? true)) {
     printDelta(results, previousSnapshot)
   }
 
-  if (!config.json) {
+  if (!config.json && shouldWriteRootReport) {
     console.log(`  Report saved to ${outPath}\n`)
   }
 

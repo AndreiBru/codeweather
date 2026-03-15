@@ -91,6 +91,7 @@ codeweather graph --layers           # Folder-level architecture graph
 codeweather graph --focus <file>     # Single file + direct deps
 codeweather history                  # Snapshot history table
 codeweather history --last 10        # Show only the latest 10 snapshots
+codeweather backfill --count 10 --every 20
 codeweather dashboard                # Generate HTML dashboard from snapshots
 codeweather dashboard --last 25      # Build dashboard from the latest 25 snapshots
 codeweather dashboard --output reports/quality.html
@@ -123,6 +124,7 @@ Both are optional — if missing, the relevant check is skipped with an install 
 Once you have at least one full run, codeweather becomes a trend tracker:
 
 - `codeweather history` prints a terminal-friendly table with timestamp, commit, status counts, and key trend metrics.
+- `codeweather backfill --count <n> --every <n>` replays earlier first-parent commits in a temporary git worktree and saves the generated snapshots into your current directory's history.
 - `codeweather dashboard` generates `.codeweather/dashboard.html`, a self-contained dashboard with Chart.js line charts, range controls, a dependency instability panel, a tree explorer, and a snapshot table.
 - `codeweather dashboard --output <path>` writes the dashboard to a specific location for CI artifacts or docs publishing.
 - The dashboard's instability panel shows a compact summary plus ranked `Highly Unstable Files` and `Stable Highly-Depended-On Files` lists from dependency-cruiser data.
@@ -130,6 +132,8 @@ Once you have at least one full run, codeweather becomes a trend tracker:
 - The terminal summary prints a one-line trend comparison against the previous snapshot when available.
 - Use `--no-history` for one-off runs you do not want recorded.
 - Add `.codeweather/` to your project's `.gitignore` so routine runs do not dirty your worktree.
+
+Backfill is intentionally PNPM-only and runs `pnpm install` inside the temporary worktree before each historical analysis.
 
 ### Snapshot format
 

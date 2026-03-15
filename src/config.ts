@@ -1,3 +1,4 @@
+import { isAbsolute, resolve } from 'node:path'
 import { lilconfig } from 'lilconfig'
 import { detectSrcDir, detectTsConfig } from './utils/detect.js'
 
@@ -168,8 +169,11 @@ export async function loadConfig(
 
   try {
     const explorer = lilconfig('codeweather')
+    const configPath = flags.config
+      ? (isAbsolute(flags.config) ? flags.config : resolve(cwd, flags.config))
+      : undefined
     const result = flags.config
-      ? await explorer.load(flags.config)
+      ? await explorer.load(configPath)
       : await explorer.search(cwd)
     if (result?.config) {
       u = result.config

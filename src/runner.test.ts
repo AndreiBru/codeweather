@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -260,5 +260,49 @@ describe('runAll', () => {
     await statsOverview.run(config)
 
     expect(existsSync(resolve(cwd, '.codeweather/snapshots'))).toBe(false)
+  })
+
+  it('supports writing reports and snapshots to a separate output cwd', async () => {
+    const outputDir = resolve(tempDir, 'output')
+    mkdirSync(outputDir, { recursive: true })
+    const saveSnapshotSpy = vi.fn()
+    const { runner, printDeltaSpy } = await loadRunnerWithMocks({
+      previous: previousSnapshot,
+      saveSnapshotImpl: saveSnapshotSpy,
+    })
+
+    const exitCode = await runner.runAll(makeConfig({ cwd: resolve(tempDir, 'analysis') }), {
+      outputCwd: outputDir,
+      snapshotGit: { commit: 'hist123', branch: 'main', dirty: false, message: 'Historical snapshot' },
+      snapshotTimestamp: '2026-03-01T12:00:00.000Z',
+    })
+
+    expect(exitCode).toBe(0)
+    expect(readFileSync(resolve(outputDir, 'codeweather-report.md'), 'utf8')).toBe('# report')
+    expect(saveSnapshotSpy).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: outputDir,
+      git: { commit: 'hist123', branch: 'main', dirty: false, message: 'Historical snapshot' },
+      timestamp: '2026-03-01T12:00:00.000Z',
+    }))
+    expect(printDeltaSpy).toHaveBeenCalledOnce()
+  })
+
+  it('can skip writing the root report and delta output', async () => {
+    const saveSnapshotSpy = vi.fn()
+    const { runner, printDeltaSpy } = await loadRunnerWithMocks({
+      previous: previousSnapshot,
+      saveSnapshotImpl: saveSnapshotSpy,
+    })
+
+    const exitCode = await runner.runAll(makeConfig(), {
+      previousSnapshot: null,
+      writeRootReport: false,
+      printDelta: false,
+    })
+
+    expect(exitCode).toBe(0)
+    expect(existsSync(resolve(tempDir, 'codeweather-report.md'))).toBe(false)
+    expect(saveSnapshotSpy).toHaveBeenCalledOnce()
+    expect(printDeltaSpy).not.toHaveBeenCalled()
   })
 })
