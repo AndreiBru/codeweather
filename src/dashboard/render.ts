@@ -18,9 +18,9 @@ export function renderDashboardHtml(
   cwd: string,
   snapshots: SnapshotSummary[],
   trees: Record<string, SnapshotTreeIndex> = {},
-  latestArtifacts?: { duplicates?: unknown; unused?: unknown },
+  snapshotArtifacts: Record<string, { duplicates?: unknown; unused?: unknown }> = {},
 ): string {
-  const rows = buildDashboardRows(snapshots)
+  const rows = buildDashboardRows(snapshots, trees)
   const range = getSnapshotRange(snapshots)
   const chartDistDir = dirname(require.resolve('chart.js'))
   const chartJsBundle = readFileSync(resolve(chartDistDir, 'chart.umd.js'), 'utf8')
@@ -30,12 +30,18 @@ export function renderDashboardHtml(
     ...(rows.length > 25 ? [{ id: '25', label: 'Last 25', count: 25 }] : []),
   ]
 
-  const latestRow = rows.at(-1)
-  const latestTree = latestRow ? trees[latestRow.id] : undefined
-  const largeFiles = latestTree ? computeTopFilesByCode(latestTree, 10) : []
-  const complexFiles = latestTree ? computeTopFilesByComplexity(latestTree, 10) : []
-  const fileHotspots = latestTree ? computeHotspots(latestTree, 10) : []
-  const dirHotspots = latestTree ? computeDirectoryHotspots(latestTree, 5) : []
+  const largeFilesBySnapshot = Object.fromEntries(
+    Object.entries(trees).map(([snapshotId, tree]) => [snapshotId, computeTopFilesByCode(tree, 10)]),
+  )
+  const complexFilesBySnapshot = Object.fromEntries(
+    Object.entries(trees).map(([snapshotId, tree]) => [snapshotId, computeTopFilesByComplexity(tree, 10)]),
+  )
+  const fileHotspotsBySnapshot = Object.fromEntries(
+    Object.entries(trees).map(([snapshotId, tree]) => [snapshotId, computeHotspots(tree, 10)]),
+  )
+  const dirHotspotsBySnapshot = Object.fromEntries(
+    Object.entries(trees).map(([snapshotId, tree]) => [snapshotId, computeDirectoryHotspots(tree, 5)]),
+  )
 
   const payload = serializeForScript({
     projectName: basename(cwd),
@@ -45,11 +51,11 @@ export function renderDashboardHtml(
     trees,
     metrics: dashboardMetrics,
     controls: rangeControls,
-    largeFiles,
-    complexFiles,
-    fileHotspots,
-    dirHotspots,
-    latestArtifacts: latestArtifacts ?? null,
+    largeFilesBySnapshot,
+    complexFilesBySnapshot,
+    fileHotspotsBySnapshot,
+    dirHotspotsBySnapshot,
+    artifactsBySnapshot: snapshotArtifacts,
   })
 
   return `<!doctype html>
@@ -107,22 +113,32 @@ export function renderDashboardHtml(
       padding: 20px 24px 64px;
     }
 
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      margin: 0 -8px 20px;
+      padding: 0 8px 12px;
+      background: linear-gradient(180deg, rgba(245, 241, 234, 0.97) 0%, rgba(245, 241, 234, 0.92) 82%, rgba(245, 241, 234, 0) 100%);
+      backdrop-filter: blur(10px);
+    }
+
     /* ── Header ── */
     .header {
-      display: flex;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, auto) minmax(0, 1fr);
       align-items: center;
-      justify-content: space-between;
       gap: 16px;
       padding: 16px 0;
       border-bottom: 1px solid var(--border);
-      margin-bottom: 24px;
-      flex-wrap: wrap;
+      margin-bottom: 14px;
     }
 
     .header-left {
       display: flex;
       align-items: center;
       gap: 12px;
+      min-width: 0;
     }
 
     .header h1 {
@@ -142,23 +158,64 @@ export function renderDashboardHtml(
       border-radius: 4px;
     }
 
-    .header-meta {
+    .header-center {
       display: flex;
-      gap: 16px;
-      color: var(--text-secondary);
-      font-size: 13px;
+      justify-content: center;
+      min-width: 0;
     }
 
-    .header-meta span { white-space: nowrap; }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+
+    .snapshot-nav {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      min-width: min(100%, 620px);
+      max-width: 100%;
+    }
+
+    .snapshot-nav-summary {
+      min-width: 0;
+      flex: 1;
+      display: grid;
+      gap: 4px;
+      padding: 10px 16px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      background: rgba(255, 252, 247, 0.96);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .snapshot-nav-title {
+      font-size: 15px;
+      font-weight: 700;
+      text-align: center;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .snapshot-nav-meta {
+      font-size: 12px;
+      color: var(--text-secondary);
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
     /* ── Controls ── */
     .controls {
       display: flex;
-      justify-content: space-between;
+      justify-content: flex-end;
       align-items: center;
-      gap: 12px;
-      margin-bottom: 20px;
-      flex-wrap: wrap;
     }
 
     .seg-group {
@@ -187,11 +244,6 @@ export function renderDashboardHtml(
     .seg-group button:hover { background: var(--green-soft); color: var(--text); }
     .seg-group button.active { background: var(--text); color: #fff; }
 
-    .controls-right {
-      display: flex;
-      gap: 8px;
-    }
-
     .btn-ghost {
       padding: 6px 12px;
       font: inherit;
@@ -205,6 +257,12 @@ export function renderDashboardHtml(
     }
 
     .btn-ghost:hover { background: var(--surface); color: var(--text); }
+    .btn-ghost:disabled {
+      opacity: 0.45;
+      cursor: default;
+      background: transparent;
+      color: var(--text-tertiary);
+    }
 
     /* ── Cards & Panels ── */
     .card {
@@ -892,6 +950,14 @@ export function renderDashboardHtml(
     tr:last-child td { border-bottom: 0; }
     tr:hover td { background: var(--green-soft); }
 
+    .history-row {
+      cursor: pointer;
+    }
+
+    .history-row.active td {
+      background: var(--green-medium);
+    }
+
     .commit-badge {
       font-family: var(--font-mono);
       font-size: 12px;
@@ -921,6 +987,36 @@ export function renderDashboardHtml(
 
     @media (max-width: 700px) {
       .shell { padding: 12px 12px 40px; }
+      .topbar {
+        margin: 0 -4px 16px;
+        padding: 0 4px 10px;
+      }
+      .header {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .header-left,
+      .header-center,
+      .header-right {
+        justify-content: center;
+      }
+      .header-right {
+        width: 100%;
+      }
+      .controls {
+        justify-content: center;
+        width: 100%;
+      }
+      .snapshot-nav {
+        width: 100%;
+      }
+      .snapshot-nav-summary {
+        padding: 10px 12px;
+      }
+      .snapshot-nav-title,
+      .snapshot-nav-meta {
+        white-space: normal;
+      }
       .health-row { grid-template-columns: 1fr; justify-items: center; }
       .tree-layout { grid-template-columns: 1fr; }
       .trends-grid { grid-template-columns: 1fr; }
@@ -929,22 +1025,22 @@ export function renderDashboardHtml(
 </head>
 <body>
   <main class="shell">
-    <!-- Header -->
-    <header class="header">
-      <div class="header-left">
-        <h1>${escapeHtml(basename(cwd))}</h1>
-        <span class="header-badge">Codeweather</span>
-      </div>
-      <div class="header-meta" id="header-meta"></div>
-    </header>
-
-    <!-- Controls -->
-    <div class="controls">
-      <div class="seg-group" id="range-controls"></div>
-      <div class="controls-right">
-        <button class="btn-ghost" id="toggle-tree" type="button">Hide Tree</button>
-        <button class="btn-ghost" id="toggle-table" type="button">Hide Table</button>
-      </div>
+    <div class="topbar">
+      <!-- Header -->
+      <header class="header">
+        <div class="header-left">
+          <h1>${escapeHtml(basename(cwd))}</h1>
+          <span class="header-badge">Codeweather</span>
+        </div>
+        <div class="header-center">
+          <div class="snapshot-nav" id="snapshot-nav"></div>
+        </div>
+        <div class="header-right">
+          <div class="controls">
+            <div class="seg-group" id="range-controls"></div>
+          </div>
+        </div>
+      </header>
     </div>
 
     <!-- Health Score -->
@@ -956,10 +1052,11 @@ export function renderDashboardHtml(
             <span class="info-tip-badge" aria-hidden="true">i</span>
             <span class="info-tip-popup">Health is a weighted score from 0-100.
 
-Cycles: 35% of the score. 100 when there are no cycles, otherwise it drops by cycle density across modules.
-Duplication: 25%. Starts at 100 and drops by 5 points per duplicated-lines percent.
-Unused Code: 25%. Starts at 100 and drops by issue density per file.
-Complexity: 15%. Starts at 100 and drops by total complexity relative to total code.
+Duplication: 20%. Starts at 100 and drops by 5 points per duplicated-lines percent.
+Unused Code: 20%. Starts at 100 and drops by issue density per file.
+Complexity: 20%. Starts at 100 and drops by cyclomatic complexity per 100 code lines, using a gentler scale so typical projects do not flatline at zero.
+Oversized Files: 20%. Based on files over 350 lines of code divided by total files.
+Overly Complex Files: 20%. Based on files over complexity 10 divided by total files.
 
 Missing metrics default to 50. The trend beside the score compares this snapshot with the previous one.</span>
           </span>
@@ -975,22 +1072,19 @@ Missing metrics default to 50. The trend beside the score compares this snapshot
           <div class="section-label">Stats</div>
           <span class="info-tip">
             <span class="info-tip-badge" aria-hidden="true">i</span>
-            <span class="info-tip-popup">Large Files ranks the latest snapshot by code lines.
-Complex Files ranks by cyclomatic complexity.
+            <span class="info-tip-popup">Large Files ranks the selected snapshot by code lines.
+Complex Files ranks the selected snapshot by cyclomatic complexity.
 
 Hot Files score = round(((complexity/max file complexity) * 0.35 + (lines/max file lines) * 0.25 + (issues/max file issues) * 0.40) * 100).
 
-Hot Directories score = round(((issues/max dir issues) * 0.45 + (complexity/max dir complexity) * 0.35 + (lines/max dir lines) * 0.20) * 100).
-
-Hot scores are relative to the latest snapshot, not absolute quality grades.</span>
+Hot scores are relative to the selected snapshot, not absolute quality grades.</span>
           </span>
         </div>
       </div>
       <div class="stats-tabs" id="stats-tabs">
-        <button type="button" class="stats-tab active" data-stats-tab="large-files">Large Files</button>
+        <button type="button" class="stats-tab active" data-stats-tab="hot-files">Hot Files</button>
+        <button type="button" class="stats-tab" data-stats-tab="large-files">Large Files</button>
         <button type="button" class="stats-tab" data-stats-tab="complex-files">Complex Files</button>
-        <button type="button" class="stats-tab" data-stats-tab="hot-files">Hot Files</button>
-        <button type="button" class="stats-tab" data-stats-tab="hot-dirs">Hot Directories</button>
       </div>
       <div id="stats-content"></div>
     </section>
@@ -1043,13 +1137,14 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
 
   <script>${chartJsBundle}</script>
   <script>
-    const dashboard = ${payload};
-    const charts = [];
-    let activeRange = dashboard.controls[0]?.id ?? 'all';
-    let activeStatsTab = 'large-files';
-    let activeNodeId = null;
-    let activeTreeSnapshotId = null;
-    const expandedNodes = new Set();
+	    const dashboard = ${payload};
+	    const charts = [];
+	    let activeRange = dashboard.controls[0]?.id ?? 'all';
+	    let activeStatsTab = 'hot-files';
+	    let activeSnapshotId = dashboard.rows.at(-1)?.id ?? null;
+	    let activeNodeId = null;
+	    let activeTreeSnapshotId = null;
+	    const expandedNodes = new Set();
 
     const fmt = (v) => v == null ? '\\u2014' : Number(v).toLocaleString('en-US');
     const fmtPct = (v) => v == null ? '\\u2014' : Number(v).toFixed(1) + '%';
@@ -1150,10 +1245,48 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
       return items;
     }
 
-    function getRows(rangeId) {
-      if (rangeId === 'all') return dashboard.rows;
-      return dashboard.rows.slice(-Number(rangeId));
-    }
+	    function getRows(rangeId) {
+	      if (rangeId === 'all') return dashboard.rows;
+	      return dashboard.rows.slice(-Number(rangeId));
+	    }
+
+	    function getActiveRows() {
+	      return getRows(activeRange);
+	    }
+
+	    function ensureActiveSnapshot(rows, options) {
+	      var opts = options || {};
+	      if (!rows.length) {
+	        activeSnapshotId = null;
+	        return undefined;
+	      }
+	      var active = rows.find(function(row) { return row.id === activeSnapshotId; });
+	      if (!active || opts.preferLatest) {
+	        active = rows.at(-1);
+	        activeSnapshotId = active?.id ?? null;
+	      }
+	      return active;
+	    }
+
+	    function getActiveSnapshot(rows) {
+	      return ensureActiveSnapshot(rows);
+	    }
+
+	    function getSnapshotPosition(rows, snapshotId) {
+	      return rows.findIndex(function(row) { return row.id === snapshotId; });
+	    }
+
+	    function moveActiveSnapshot(step) {
+	      var rows = getActiveRows();
+	      var active = ensureActiveSnapshot(rows);
+	      if (!active) return;
+	      var index = getSnapshotPosition(rows, active.id);
+	      if (index < 0) return;
+	      var next = rows[index + step];
+	      if (!next) return;
+	      activeSnapshotId = next.id;
+	      render(activeRange);
+	    }
 
     function destroyCharts() {
       while (charts.length) charts.pop().destroy();
@@ -1193,24 +1326,35 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
       return sign + delta.toLocaleString('en-US');
     }
 
-    /* ── Header ── */
-    function renderHeader(rows) {
-      const el = document.getElementById('header-meta');
-      const latest = rows.at(-1);
-      const parts = [];
-      if (latest) {
-        parts.push('<span>' + esc(latest.label.replace(' UTC','')) + '</span>');
-        parts.push('<span>' + esc(latest.commit + (latest.dirty ? '*' : '')) + (latest.branch ? ' on ' + esc(latest.branch) : '') + '</span>');
-      }
-      parts.push('<span>' + rows.length + ' snapshot' + (rows.length !== 1 ? 's' : '') + '</span>');
-      el.innerHTML = parts.join('');
-    }
+	    /* ── Header ── */
+	    function renderHeader(rows, active) {
+	      const navEl = document.getElementById('snapshot-nav');
 
-    /* ── Health Score ── */
-    function renderHealthScore(rows) {
-      const el = document.getElementById('health-content');
-      const latest = rows.at(-1);
-      const hs = latest?.healthScore;
+	      if (!active) {
+	        navEl.innerHTML = '';
+	        return;
+	      }
+
+	      var index = getSnapshotPosition(rows, active.id);
+	      var prevDisabled = index <= 0;
+	      var nextDisabled = index === -1 || index >= rows.length - 1;
+	      var branchText = active.branch ? ' on ' + active.branch : '';
+	      var dirtyText = active.dirty ? ' dirty' : ' clean';
+	      var snapshotTitle = active.label.replace(' UTC','');
+	      var snapshotMeta = active.commit + branchText + ' · ' + 'Snapshot ' + (index + 1) + ' of ' + rows.length + ' ·' + dirtyText;
+	      navEl.innerHTML =
+	        '<button type="button" class="btn-ghost" id="snapshot-prev"' + (prevDisabled ? ' disabled' : '') + '>◀</button>' +
+	        '<div class="snapshot-nav-summary">' +
+	          '<div class="snapshot-nav-title">' + esc(snapshotTitle) + '</div>' +
+	          '<div class="snapshot-nav-meta">' + esc(snapshotMeta) + '</div>' +
+	        '</div>' +
+	        '<button type="button" class="btn-ghost" id="snapshot-next"' + (nextDisabled ? ' disabled' : '') + '>▶</button>';
+	    }
+
+	    /* ── Health Score ── */
+	    function renderHealthScore(active) {
+	      const el = document.getElementById('health-content');
+	      const hs = active?.healthScore;
 
       if (!hs) {
         el.innerHTML = '<div class="health-empty">No health data available for the selected range.</div>';
@@ -1222,6 +1366,13 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
       const color = scoreColor(hs.overall);
       const trendClass = hs.trend > 0 ? 'up' : hs.trend < 0 ? 'down' : 'flat';
       const trendText = hs.trend > 0 ? '+' + hs.trend : hs.trend < 0 ? String(hs.trend) : '\\u2014';
+
+      function formatSubScoreValue(score) {
+        if (score.displaySuffix === '%') {
+          return (score.displayValue ?? 0).toFixed(1) + '%';
+        }
+        return String(score.displayValue ?? score.score);
+      }
 
       el.innerHTML = '<div class="health-row">' +
         '<div class="health-ring">' +
@@ -1237,17 +1388,17 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
             '<span class="health-caption">Health</span>' +
           '</div>' +
         '</div>' +
-        '<div class="health-detail">' +
-          hs.subScores.map(function(s) {
-            return '<div class="sub-score">' +
-              '<span class="sub-score-label">' + esc(s.label) + '</span>' +
-              '<div class="sub-score-bar-track">' +
-                '<div class="sub-score-bar-fill" style="width:' + s.score + '%;background:' + s.color + '"></div>' +
-              '</div>' +
-              '<span class="sub-score-value">' + s.score + '</span>' +
-            '</div>';
-          }).join('') +
-        '</div>' +
+	        '<div class="health-detail">' +
+	          hs.subScores.map(function(s) {
+	            return '<div class="sub-score">' +
+	              '<span class="sub-score-label">' + esc(s.label) + '</span>' +
+	              '<div class="sub-score-bar-track">' +
+	                '<div class="sub-score-bar-fill" style="width:' + (s.barWidth ?? s.score) + '%;background:' + s.color + '"></div>' +
+	              '</div>' +
+	              '<span class="sub-score-value">' + esc(formatSubScoreValue(s)) + '</span>' +
+	            '</div>';
+	          }).join('') +
+	          '</div>' +
       '</div>';
     }
 
@@ -1304,34 +1455,34 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
       }).join('') + '</div>';
     }
 
-    function renderStats() {
-      const el = document.getElementById('stats-content');
-      if (activeStatsTab === 'large-files') {
-        el.innerHTML = renderRankedFileList(dashboard.largeFiles, 'Code lines');
-        return;
-      }
-      if (activeStatsTab === 'complex-files') {
-        el.innerHTML = renderRankedFileList(dashboard.complexFiles, 'Complexity');
-        return;
-      }
-      if (activeStatsTab === 'hot-dirs') {
-        el.innerHTML = renderHotspotList(dashboard.dirHotspots);
-        return;
-      }
-      el.innerHTML = renderHotspotList(dashboard.fileHotspots);
-    }
+	    function renderStats(active) {
+	      const el = document.getElementById('stats-content');
+	      const snapshotId = active?.id;
+	      const largeFiles = snapshotId ? dashboard.largeFilesBySnapshot?.[snapshotId] : [];
+	      const complexFiles = snapshotId ? dashboard.complexFilesBySnapshot?.[snapshotId] : [];
+	      const hotFiles = snapshotId ? dashboard.fileHotspotsBySnapshot?.[snapshotId] : [];
+	      if (activeStatsTab === 'large-files') {
+	        el.innerHTML = renderRankedFileList(largeFiles, 'Code lines');
+	        return;
+	      }
+	      if (activeStatsTab === 'complex-files') {
+	        el.innerHTML = renderRankedFileList(complexFiles, 'Complexity');
+	        return;
+	      }
+	      el.innerHTML = renderHotspotList(hotFiles);
+	    }
 
-    /* ── Trends ── */
-    function renderTrends(rows) {
-      destroyCharts();
-      const grid = document.getElementById('trends-grid');
+	    /* ── Trends ── */
+	    function renderTrends(rows, active) {
+	      destroyCharts();
+	      const grid = document.getElementById('trends-grid');
+	      const activeIndex = active ? getSnapshotPosition(rows, active.id) : -1;
 
-      grid.innerHTML = dashboard.metrics.map(function(m) {
-        const latest = rows.at(-1);
-        const val = latest?.metrics?.[m.key];
-        const delta = metricDelta(rows, m.key);
-        const dClass = deltaClass(m.key, delta);
-        const dText = deltaText(m.key, delta);
+	      grid.innerHTML = dashboard.metrics.map(function(m) {
+	        const val = active?.metrics?.[m.key];
+	        const delta = active ? metricDelta(rows.slice(0, getSnapshotPosition(rows, active.id) + 1), m.key) : null;
+	        const dClass = deltaClass(m.key, delta);
+	        const dText = deltaText(m.key, delta);
 
         return '<article class="card trend-card">' +
           '<div class="trend-header">' +
@@ -1345,35 +1496,56 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
         '</article>';
       }).join('');
 
-      dashboard.metrics.forEach(function(m) {
-        const canvas = document.getElementById('chart-' + m.key);
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        const values = rows.map(function(r) { return r.metrics?.[m.key] ?? null; });
-        const chart = new Chart(ctx, {
-          type: 'line',
-          data: {
-            labels: rows.map(function(r) { return r.label; }),
-            datasets: [{
-              data: values,
-              borderColor: m.color,
-              backgroundColor: m.color + '18',
-              borderWidth: 2,
-              pointRadius: rows.length > 30 ? 0 : 3,
-              pointHoverRadius: 4,
-              pointBackgroundColor: m.color,
-              spanGaps: true,
-              tension: 0.3,
-              fill: true,
-            }],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { intersect: false, mode: 'index' },
-            plugins: {
-              legend: { display: false },
-              tooltip: {
+	      dashboard.metrics.forEach(function(m) {
+	        const canvas = document.getElementById('chart-' + m.key);
+	        if (!canvas) return;
+	        const ctx = canvas.getContext('2d');
+	        const values = rows.map(function(r) { return r.metrics?.[m.key] ?? null; });
+	        const activeValue = activeIndex >= 0 ? values[activeIndex] : null;
+	        const chart = new Chart(ctx, {
+	          type: 'line',
+	          data: {
+	            labels: rows.map(function(r) { return r.label; }),
+	            datasets: [
+	              {
+	                data: values,
+	                borderColor: m.color,
+	                backgroundColor: m.color + '18',
+	                borderWidth: 2,
+	                pointRadius: rows.length > 30 ? 0 : 3,
+	                pointHoverRadius: 4,
+	                pointBackgroundColor: m.color,
+	                spanGaps: true,
+	                tension: 0.3,
+	                fill: true,
+	              },
+	              {
+	                data: values.map(function(value, index) {
+	                  return index === activeIndex ? value : null;
+	                }),
+	                borderWidth: 0,
+	                pointRadius: activeIndex >= 0 && activeValue != null ? 6 : 0,
+	                pointHoverRadius: activeIndex >= 0 && activeValue != null ? 7 : 0,
+	                pointBackgroundColor: '#fffcf7',
+	                pointBorderColor: m.color,
+	                pointBorderWidth: 3,
+	                pointHitRadius: 10,
+	                showLine: false,
+	                spanGaps: true,
+	              },
+	            ],
+	          },
+	          options: {
+	            responsive: true,
+	            maintainAspectRatio: false,
+	            interaction: { intersect: false, mode: 'index' },
+	            plugins: {
+	              activeSnapshotGuide: {
+	                activeIndex: activeIndex,
+	                color: m.color,
+	              },
+	              legend: { display: false },
+	              tooltip: {
                 titleFont: { size: 11 },
                 bodyFont: { size: 11 },
                 padding: 8,
@@ -1398,21 +1570,40 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
                   callback: function(v) { return fmtMetric(m, v); },
                 },
               },
-            },
-          },
-        });
-        charts.push(chart);
-      });
-    }
+	            },
+	          },
+	          plugins: [{
+	            id: 'activeSnapshotGuide',
+	            afterDatasetsDraw: function(chart, _args, options) {
+	              if (options?.activeIndex == null || options.activeIndex < 0) return;
+	              var xScale = chart.scales.x;
+	              var chartArea = chart.chartArea;
+	              if (!xScale || !chartArea) return;
+	              var x = xScale.getPixelForValue(options.activeIndex);
+	              if (!Number.isFinite(x)) return;
+	              var ctx = chart.ctx;
+	              ctx.save();
+	              ctx.strokeStyle = options.color + '66';
+	              ctx.lineWidth = 2;
+	              ctx.beginPath();
+	              ctx.moveTo(x, chartArea.top);
+	              ctx.lineTo(x, chartArea.bottom);
+	              ctx.stroke();
+	              ctx.restore();
+	            },
+	          }],
+	        });
+	        charts.push(chart);
+	      });
+	    }
 
     /* ── Tree ── */
-    function getTreeSnapshot(rows) {
-      var latest = rows.at(-1);
-      if (!latest) return undefined;
-      var tree = dashboard.trees?.[latest.id];
-      if (!tree) return undefined;
-      return { row: latest, tree: tree };
-    }
+	    function getTreeSnapshot(active) {
+	      if (!active) return undefined;
+	      var tree = dashboard.trees?.[active.id];
+	      if (!tree) return undefined;
+	      return { row: active, tree: tree };
+	    }
 
     function ensureExpanded(tree) {
       if (!tree) return;
@@ -1481,10 +1672,10 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
       }
 
       var dupSection = '';
-      if (node.kind === 'file' && node.issues.duplication > 0 && dashboard.latestArtifacts?.duplicates?.duplicates) {
-        var clones = dashboard.latestArtifacts.duplicates.duplicates.filter(function(d) {
-          return d.firstFile?.name === node.path || d.secondFile?.name === node.path;
-        });
+	      if (node.kind === 'file' && node.issues.duplication > 0 && dashboard.artifactsBySnapshot?.[treeSnapshot.row.id]?.duplicates?.duplicates) {
+	        var clones = dashboard.artifactsBySnapshot[treeSnapshot.row.id].duplicates.duplicates.filter(function(d) {
+	          return d.firstFile?.name === node.path || d.secondFile?.name === node.path;
+	        });
         if (clones.length > 0) {
           dupSection = '<div>' +
             '<div class="tree-detail-section-title">Duplicates</div>' +
@@ -1515,8 +1706,8 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
       }
 
       var unusedSection = '';
-      if (node.kind === 'file' && node.issues.unused > 0 && dashboard.latestArtifacts?.unused) {
-        var items = collectUnusedItems(dashboard.latestArtifacts.unused, node.path);
+	      if (node.kind === 'file' && node.issues.unused > 0 && dashboard.artifactsBySnapshot?.[treeSnapshot.row.id]?.unused) {
+	        var items = collectUnusedItems(dashboard.artifactsBySnapshot[treeSnapshot.row.id].unused, node.path);
 
         if (items.length > 0) {
           unusedSection = '<div>' +
@@ -1529,7 +1720,7 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
         } else {
           unusedSection = '<div>' +
             '<div class="tree-detail-section-title">Unused Code</div>' +
-            '<div class="tree-detail-empty">No detailed unused-code entries were found in the latest snapshot artifact.</div>' +
+            '<div class="tree-detail-empty">No detailed unused-code entries were found in the selected snapshot artifact.</div>' +
           '</div>';
         }
       }
@@ -1561,10 +1752,10 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
         unusedSection;
     }
 
-    function renderTree(rows) {
-      var treeRoot = document.getElementById('tree-root');
-      var treeSnapshot = getTreeSnapshot(rows);
-      var metaEl = document.getElementById('tree-meta');
+	    function renderTree(active) {
+	      var treeRoot = document.getElementById('tree-root');
+	      var treeSnapshot = getTreeSnapshot(active);
+	      var metaEl = document.getElementById('tree-meta');
 
       if (!treeSnapshot) {
         activeTreeSnapshotId = null;
@@ -1597,7 +1788,7 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
         for (var k = 0; k < row.status.fail; k++) dots += '<span class="status-dot fail"></span>';
         for (var l = 0; l < row.status.skip; l++) dots += '<span class="status-dot skip"></span>';
 
-        return '<tr>' +
+        return '<tr class="history-row' + (row.id === activeSnapshotId ? ' active' : '') + '" data-select-snapshot="' + esc(row.id) + '">' +
           '<td>' + esc(row.label.replace(' UTC','')) + '</td>' +
           '<td><span class="commit-badge">' + esc(row.commit + (row.dirty ? '*':'')) + '</span></td>' +
           '<td>' + (row.healthScore ? row.healthScore.overall : '\\u2014') + '</td>' +
@@ -1615,14 +1806,15 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
     function render(rangeId) {
       activeRange = rangeId;
       var rows = getRows(rangeId);
+      var active = ensureActiveSnapshot(rows);
       document.querySelectorAll('#range-controls button').forEach(function(b) {
         b.classList.toggle('active', b.dataset.range === rangeId);
       });
-      renderHeader(rows);
-      renderHealthScore(rows);
-      renderStats();
-      renderTrends(rows);
-      renderTree(rows);
+      renderHeader(rows, active);
+      renderHealthScore(active);
+      renderStats(active);
+      renderTrends(rows, active);
+      renderTree(active);
       renderTable(rows);
     }
 
@@ -1634,19 +1826,12 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
 
     rangeEl.addEventListener('click', function(e) {
       var btn = e.target.closest('button[data-range]');
-      if (btn) render(btn.dataset.range);
-    });
-
-    document.getElementById('toggle-table').addEventListener('click', function() {
-      var panel = document.getElementById('table-panel');
-      var hidden = panel.classList.toggle('hidden');
-      this.textContent = hidden ? 'Show Table' : 'Hide Table';
-    });
-
-    document.getElementById('toggle-tree').addEventListener('click', function() {
-      var panel = document.getElementById('tree-section');
-      var hidden = panel.classList.toggle('hidden');
-      this.textContent = hidden ? 'Show Tree' : 'Hide Tree';
+      if (!btn) return;
+      var rows = getRows(btn.dataset.range);
+      if (!rows.find(function(row) { return row.id === activeSnapshotId; })) {
+        activeSnapshotId = rows.at(-1)?.id ?? null;
+      }
+      render(btn.dataset.range);
     });
 
     document.getElementById('stats-tabs').addEventListener('click', function(e) {
@@ -1656,7 +1841,7 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
       this.querySelectorAll('.stats-tab').forEach(function(t) {
         t.classList.toggle('active', t.dataset.statsTab === activeStatsTab);
       });
-      renderStats();
+      renderStats(getActiveSnapshot(getActiveRows()));
     });
 
     document.getElementById('tree-root').addEventListener('click', function(e) {
@@ -1671,8 +1856,28 @@ Hot scores are relative to the latest snapshot, not absolute quality grades.</sp
       var btn = e.target.closest('[data-select-node]');
       if (!btn) return;
       activeNodeId = btn.dataset.selectNode;
-      var rows = getRows(activeRange);
-      renderTree(rows);
+      renderTree(getActiveSnapshot(getActiveRows()));
+    });
+
+    document.getElementById('history-body').addEventListener('click', function(e) {
+      var row = e.target.closest('[data-select-snapshot]');
+      if (!row) return;
+      activeSnapshotId = row.dataset.selectSnapshot;
+      render(activeRange);
+    });
+
+    document.addEventListener('click', function(e) {
+      if (e.target.id === 'snapshot-prev') moveActiveSnapshot(-1);
+      if (e.target.id === 'snapshot-next') moveActiveSnapshot(1);
+    });
+
+    document.addEventListener('keydown', function(e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      var target = e.target;
+      var tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
+      if (e.key === 'ArrowLeft') moveActiveSnapshot(-1);
+      if (e.key === 'ArrowRight') moveActiveSnapshot(1);
     });
 
     render(activeRange);

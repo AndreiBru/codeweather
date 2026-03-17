@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { computeHealthScore } from './dashboard/charts.js'
 import { renderDashboardHtml } from './dashboard/render.js'
 import { renderHistoryTable } from './history/render.js'
 import { createSnapshot } from './history/store.js'
@@ -195,6 +196,55 @@ describe('history rendering', () => {
 })
 
 describe('dashboard rendering', () => {
+  it('keeps complexity health above zero for moderate complexity ratios', () => {
+    const health = computeHealthScore(snapshots[1], {
+      rootId: 'src',
+      nodes: {
+        src: {
+          path: 'src',
+          name: 'src',
+          kind: 'dir',
+          childIds: ['src/a.ts', 'src/b.ts'],
+          stats: { files: 2, lines: 240, code: 180, complexity: 24 },
+          issues: { total: 0, unused: 0, duplication: 0, cycles: 0 },
+        },
+        'src/a.ts': {
+          path: 'src/a.ts',
+          name: 'a.ts',
+          kind: 'file',
+          childIds: [],
+          stats: { files: 1, lines: 120, code: 90, complexity: 12 },
+          issues: { total: 0, unused: 0, duplication: 0, cycles: 0 },
+        },
+        'src/b.ts': {
+          path: 'src/b.ts',
+          name: 'b.ts',
+          kind: 'file',
+          childIds: [],
+          stats: { files: 1, lines: 120, code: 90, complexity: 12 },
+          issues: { total: 0, unused: 0, duplication: 0, cycles: 0 },
+        },
+      },
+    })
+    const complexity = health.subScores.find((score) => score.key === 'complexity')
+    const duplication = health.subScores.find((score) => score.key === 'duplication')
+    const oversizedFiles = health.subScores.find((score) => score.key === 'oversized-files')
+    const overlyComplexFiles = health.subScores.find((score) => score.key === 'overly-complex-files')
+
+    expect(complexity?.score).toBeGreaterThan(0)
+    expect(duplication?.displayValue).toBe(1.5)
+    expect(duplication?.displaySuffix).toBe('%')
+    expect(duplication?.barWidth).toBe(1.5)
+    expect(oversizedFiles?.label).toBe('Oversized Files')
+    expect(oversizedFiles?.displayValue).toBe(0)
+    expect(oversizedFiles?.displaySuffix).toBe('%')
+    expect(oversizedFiles?.barWidth).toBe(0)
+    expect(overlyComplexFiles?.label).toBe('Overly Complex Files')
+    expect(overlyComplexFiles?.displayValue).toBe(100)
+    expect(overlyComplexFiles?.displaySuffix).toBe('%')
+    expect(overlyComplexFiles?.barWidth).toBe(100)
+  })
+
   it('renders self-contained html with Chart.js charts, controls, and tree prototype', () => {
     const html = renderDashboardHtml('/tmp/project-name', snapshots, {
       [snapshots[1].id]: {
@@ -220,45 +270,47 @@ describe('dashboard rendering', () => {
         },
       },
     }, {
-      duplicates: {
-        duplicates: [
-          {
-            lines: 3,
-            fragment: 'const shared = true',
-            firstFile: {
-              name: 'src/app.ts',
-              startLoc: { line: 10 },
-              endLoc: { line: 12 },
+      [snapshots[1].id]: {
+        duplicates: {
+          duplicates: [
+            {
+              lines: 3,
+              fragment: 'const shared = true',
+              firstFile: {
+                name: 'src/app.ts',
+                startLoc: { line: 10 },
+                endLoc: { line: 12 },
+              },
+              secondFile: {
+                name: 'src/lib.ts',
+                startLoc: { line: 20 },
+                endLoc: { line: 22 },
+              },
             },
-            secondFile: {
-              name: 'src/lib.ts',
-              startLoc: { line: 20 },
-              endLoc: { line: 22 },
+          ],
+        },
+        unused: {
+          files: [],
+          issues: [
+            {
+              file: 'src/app.ts',
+              exports: [{ name: 'unusedThing', line: 9 }],
+              dependencies: [],
+              devDependencies: [],
+              optionalPeerDependencies: [],
+              unlisted: [],
+              binaries: [],
+              unresolved: [],
+              nsExports: [],
+              classMembers: [],
+              types: [],
+              nsTypes: [],
+              enumMembers: {},
+              duplicates: [],
+              catalog: [],
             },
-          },
-        ],
-      },
-      unused: {
-        files: [],
-        issues: [
-          {
-            file: 'src/app.ts',
-            exports: [{ name: 'unusedThing', line: 9 }],
-            dependencies: [],
-            devDependencies: [],
-            optionalPeerDependencies: [],
-            unlisted: [],
-            binaries: [],
-            unresolved: [],
-            nsExports: [],
-            classMembers: [],
-            types: [],
-            nsTypes: [],
-            enumMembers: {},
-            duplicates: [],
-            catalog: [],
-          },
-        ],
+          ],
+        },
       },
     })
 
@@ -266,16 +318,22 @@ describe('dashboard rendering', () => {
     expect(html).toContain('project-name')
     expect(html).toContain('new Chart')
     expect(html).toContain('range-controls')
-    expect(html).toContain('Hide Table')
     expect(html).toContain('Codeweather')
+    expect(html).toContain('snapshot-nav-summary')
+    expect(html).toContain('snapshot-prev')
+    expect(html).toContain('snapshot-next')
     expect(html).toContain('Stats')
+    expect(html).toContain('<button type="button" class="stats-tab active" data-stats-tab="hot-files">Hot Files</button>')
     expect(html).toContain('Large Files')
     expect(html).toContain('Complex Files')
     expect(html).toContain('Hot Files')
-    expect(html).toContain('Hot Directories')
     expect(html).toContain('Health')
     expect(html).toContain('weighted score from 0-100')
     expect(html).toContain('Hot Files score = round')
+    expect(html).toContain('snapshot-nav')
+    expect(html).toContain('data-select-snapshot')
+    expect(html).toContain('activeSnapshotGuide')
+    expect(html).toContain("pointBorderWidth: 3")
     expect(html).toContain('Codebase Tree')
     expect(html).toContain('app.ts')
     expect(html).toContain('Trends')

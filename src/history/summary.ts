@@ -53,8 +53,40 @@ export function getSnapshotTrendMetrics(snapshot: SnapshotSummary): SnapshotTren
   }
 }
 
+function formatOrdinalDay(day: number): string {
+  const mod100 = day % 100
+  if (mod100 >= 11 && mod100 <= 13) {
+    return `${day}th`
+  }
+
+  switch (day % 10) {
+    case 1:
+      return `${day}st`
+    case 2:
+      return `${day}nd`
+    case 3:
+      return `${day}rd`
+    default:
+      return `${day}th`
+  }
+}
+
 export function formatSnapshotTimestamp(timestamp: string): string {
-  return timestamp.replace('T', ' ').replace(/\.\d+Z$/, ' UTC')
+  const date = new Date(timestamp)
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    timeZone: 'UTC',
+  }).format(date)
+  const month = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    timeZone: 'UTC',
+  }).format(date)
+  const year = new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date)
+
+  return `${weekday}, ${month} ${formatOrdinalDay(date.getUTCDate())} ${year}`
 }
 
 export function getSnapshotRange(snapshots: SnapshotSummary[]): { start: string; end: string } | undefined {

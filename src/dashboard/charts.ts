@@ -5,7 +5,6 @@ import {
 } from '../history/summary.js'
 import { findMetric } from '../checks/metrics.js'
 import type {
-  CyclesMetrics,
   DuplicatesMetrics,
   StatsOverviewMetrics,
   UnusedMetrics,
@@ -14,6 +13,7 @@ import type {
   SnapshotInstability,
   SnapshotSummary,
   SnapshotTreeIndex,
+  SnapshotTreeNode,
 } from '../history/types.js'
 
 export type DashboardMetricKey =
@@ -36,6 +36,9 @@ export interface HealthSubScore {
   score: number
   weight: number
   color: string
+  displayValue?: number
+  displaySuffix?: string
+  barWidth?: number
 }
 
 export interface HealthScore {
@@ -109,18 +112,21 @@ export const dashboardMetrics: DashboardMetricDefinition[] = [
 
 export function computeHealthScore(
   snapshot: SnapshotSummary,
+  tree?: SnapshotTreeIndex,
   previousSnapshot?: SnapshotSummary,
+  previousTree?: SnapshotTreeIndex,
 ): HealthScore {
   const stats = findMetric(snapshot.checks, 'stats-overview') as StatsOverviewMetrics | undefined
   const unused = findMetric(snapshot.checks, 'unused') as UnusedMetrics | undefined
   const duplicates = findMetric(snapshot.checks, 'duplicates') as DuplicatesMetrics | undefined
-  const cycles = findMetric(snapshot.checks, 'cycles') as CyclesMetrics | undefined
-
-  const cyclesScore = !cycles
-    ? 50
-    : cycles.cycleCount === 0
-      ? 100
-      : Math.max(0, 100 - (cycles.cycleCount / Math.max(cycles.totalModules, 1)) * 500)
+  const fileNodes = tree
+    ? Object.values(tree.nodes).filter((node): node is SnapshotTreeNode => node.kind === 'file')
+    : []
+  const totalFiles = Math.max(fileNodes.length || stats?.totalFiles || 0, 1)
+  const oversizedFiles = fileNodes.filter((node) => node.stats.code > 350).length
+  const overlyComplexFiles = fileNodes.filter((node) => node.stats.complexity > 10).length
+  const oversizedFilesPercent = (oversizedFiles / totalFiles) * 100
+  const overlyComplexFilesPercent = (overlyComplexFiles / totalFiles) * 100
 
   const duplicationScore = !duplicates
     ? 50
@@ -130,22 +136,59 @@ export function computeHealthScore(
     ? 50
     : Math.max(0, 100 - (unused.totalIssues / Math.max(stats.totalFiles, 1)) * 50)
 
+  const complexityPer100Code = !stats
+    ? undefined
+    : (stats.totalComplexity / Math.max(stats.totalCode, 1)) * 100
   const complexityScore = !stats
     ? 50
-    : Math.max(0, 100 - (stats.totalComplexity / Math.max(stats.totalCode, 1)) * 1000)
+    : Math.max(0, 100 - complexityPer100Code * 2.5)
+  const oversizedFilesScore = tree
+    ? Math.max(0, 100 - oversizedFilesPercent)
+    : 50
+  const overlyComplexFilesScore = tree
+    ? Math.max(0, 100 - overlyComplexFilesPercent)
+    : 50
 
   const subScores: HealthSubScore[] = [
-    { key: 'cycles', label: 'Cycles', score: Math.round(cyclesScore), weight: 0.35, color: '#a12844' },
-    { key: 'duplication', label: 'Duplication', score: Math.round(duplicationScore), weight: 0.25, color: '#1a56b8' },
-    { key: 'unused', label: 'Unused Code', score: Math.round(unusedScore), weight: 0.25, color: '#c2570a' },
-    { key: 'complexity', label: 'Complexity', score: Math.round(complexityScore), weight: 0.15, color: '#7c5e2a' },
+    {
+      key: 'duplication',
+      label: 'Duplication',
+      score: Math.round(duplicationScore),
+      weight: 0.2,
+      color: '#1a56b8',
+      displayValue: duplicates?.duplicatedLinesPercent ?? 0,
+      displaySuffix: '%',
+      barWidth: Math.max(0, Math.min(100, duplicates?.duplicatedLinesPercent ?? 0)),
+    },
+    { key: 'unused', label: 'Unused Code', score: Math.round(unusedScore), weight: 0.2, color: '#c2570a' },
+    { key: 'complexity', label: 'Complexity', score: Math.round(complexityScore), weight: 0.2, color: '#7c5e2a' },
+    {
+      key: 'oversized-files',
+      label: 'Oversized Files',
+      score: Math.round(oversizedFilesScore),
+      weight: 0.2,
+      color: '#7f4f24',
+      displayValue: oversizedFilesPercent,
+      displaySuffix: '%',
+      barWidth: Math.max(0, Math.min(100, oversizedFilesPercent)),
+    },
+    {
+      key: 'overly-complex-files',
+      label: 'Overly Complex Files',
+      score: Math.round(overlyComplexFilesScore),
+      weight: 0.2,
+      color: '#8b3d2f',
+      displayValue: overlyComplexFilesPercent,
+      displaySuffix: '%',
+      barWidth: Math.max(0, Math.min(100, overlyComplexFilesPercent)),
+    },
   ]
 
   const overall = Math.round(subScores.reduce((sum, s) => sum + s.score * s.weight, 0))
 
   let trend = 0
   if (previousSnapshot) {
-    const prev = computeHealthScore(previousSnapshot)
+    const prev = computeHealthScore(previousSnapshot, previousTree)
     trend = overall - prev.overall
   }
 
@@ -275,7 +318,10 @@ export function computeTopFilesByComplexity(tree: SnapshotTreeIndex, limit = 10)
     }))
 }
 
-export function buildDashboardRows(snapshots: SnapshotSummary[]): DashboardSnapshotRow[] {
+export function buildDashboardRows(
+  snapshots: SnapshotSummary[],
+  trees: Record<string, SnapshotTreeIndex> = {},
+): DashboardSnapshotRow[] {
   const sorted = [...snapshots].sort((left, right) => left.timestamp.localeCompare(right.timestamp))
 
   return sorted.map((snapshot, index) => ({
@@ -292,6 +338,11 @@ export function buildDashboardRows(snapshots: SnapshotSummary[]): DashboardSnaps
       nodeCount: snapshot.tree.nodeCount,
     },
     instability: snapshot.instability,
-    healthScore: computeHealthScore(snapshot, index > 0 ? sorted[index - 1] : undefined),
+    healthScore: computeHealthScore(
+      snapshot,
+      trees[snapshot.id],
+      index > 0 ? sorted[index - 1] : undefined,
+      index > 0 ? trees[sorted[index - 1].id] : undefined,
+    ),
   }))
 }
