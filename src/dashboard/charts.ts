@@ -61,6 +61,16 @@ export interface Hotspot {
   issues: { total: number; unused: number; duplication: number; cycles: number }
 }
 
+export interface FileStatRank {
+  path: string
+  name: string
+  kind: 'file'
+  primaryMetric: 'code' | 'complexity'
+  primaryValue: number
+  stats: { lines: number; code: number; complexity: number }
+  issues: { total: number; unused: number; duplication: number; cycles: number }
+}
+
 export interface DashboardSnapshotRow {
   id: string
   timestamp: string
@@ -223,6 +233,46 @@ export function computeDirectoryHotspots(tree: SnapshotTreeIndex, limit = 5): Ho
     .filter((h) => h.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
+}
+
+export function computeTopFilesByCode(tree: SnapshotTreeIndex, limit = 10): FileStatRank[] {
+  return Object.values(tree.nodes)
+    .filter((node) => node.kind === 'file')
+    .sort((left, right) => (
+      right.stats.code - left.stats.code ||
+      right.stats.lines - left.stats.lines ||
+      right.stats.complexity - left.stats.complexity
+    ))
+    .slice(0, limit)
+    .map((node) => ({
+      path: node.path,
+      name: node.name,
+      kind: 'file' as const,
+      primaryMetric: 'code' as const,
+      primaryValue: node.stats.code,
+      stats: { lines: node.stats.lines, code: node.stats.code, complexity: node.stats.complexity },
+      issues: node.issues,
+    }))
+}
+
+export function computeTopFilesByComplexity(tree: SnapshotTreeIndex, limit = 10): FileStatRank[] {
+  return Object.values(tree.nodes)
+    .filter((node) => node.kind === 'file')
+    .sort((left, right) => (
+      right.stats.complexity - left.stats.complexity ||
+      right.stats.code - left.stats.code ||
+      right.stats.lines - left.stats.lines
+    ))
+    .slice(0, limit)
+    .map((node) => ({
+      path: node.path,
+      name: node.name,
+      kind: 'file' as const,
+      primaryMetric: 'complexity' as const,
+      primaryValue: node.stats.complexity,
+      stats: { lines: node.stats.lines, code: node.stats.code, complexity: node.stats.complexity },
+      issues: node.issues,
+    }))
 }
 
 export function buildDashboardRows(snapshots: SnapshotSummary[]): DashboardSnapshotRow[] {

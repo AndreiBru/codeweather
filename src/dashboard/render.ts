@@ -1,7 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
-import { buildDashboardRows, computeHotspots, computeDirectoryHotspots, dashboardMetrics } from './charts.js'
+import {
+  buildDashboardRows,
+  computeHotspots,
+  computeDirectoryHotspots,
+  computeTopFilesByCode,
+  computeTopFilesByComplexity,
+  dashboardMetrics,
+} from './charts.js'
 import { getSnapshotRange } from '../history/summary.js'
 import type { SnapshotSummary, SnapshotTreeIndex } from '../history/types.js'
 
@@ -25,6 +32,8 @@ export function renderDashboardHtml(
 
   const latestRow = rows.at(-1)
   const latestTree = latestRow ? trees[latestRow.id] : undefined
+  const largeFiles = latestTree ? computeTopFilesByCode(latestTree, 10) : []
+  const complexFiles = latestTree ? computeTopFilesByComplexity(latestTree, 10) : []
   const fileHotspots = latestTree ? computeHotspots(latestTree, 10) : []
   const dirHotspots = latestTree ? computeDirectoryHotspots(latestTree, 5) : []
 
@@ -36,6 +45,8 @@ export function renderDashboardHtml(
     trees,
     metrics: dashboardMetrics,
     controls: rangeControls,
+    largeFiles,
+    complexFiles,
     fileHotspots,
     dirHotspots,
     latestArtifacts: latestArtifacts ?? null,
@@ -215,6 +226,73 @@ export function renderDashboardHtml(
 
     .section-gap { margin-bottom: 16px; }
 
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .section-title-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .section-head .section-label { margin-bottom: 0; }
+
+    .info-tip {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: none;
+    }
+
+    .info-tip-badge {
+      width: 18px;
+      height: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface-solid);
+      color: var(--text-tertiary);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: help;
+    }
+
+    .info-tip-popup {
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 10px);
+      transform: translateX(-50%);
+      width: min(320px, calc(100vw - 48px));
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      background: #1f1b17;
+      color: #fff7ed;
+      border: 1px solid rgba(255, 247, 237, 0.14);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-line;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 120ms ease, transform 120ms ease;
+      z-index: 5;
+    }
+
+    .info-tip:hover .info-tip-popup,
+    .info-tip:focus-within .info-tip-popup {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-2px);
+    }
+
     /* ── Health Score ── */
     .health-row {
       display: grid;
@@ -329,17 +407,18 @@ export function renderDashboardHtml(
       text-align: center;
     }
 
-    /* ── Hotspots ── */
-    .hotspots-panel { padding: 20px; }
+    /* ── Stats ── */
+    .stats-panel { padding: 20px; }
 
-    .hotspots-tabs {
+    .stats-tabs {
       display: flex;
-      gap: 0;
+      gap: 0 2px;
       border-bottom: 1px solid var(--border);
       margin-bottom: 16px;
+      flex-wrap: wrap;
     }
 
-    .hotspots-tab {
+    .stats-tab {
       padding: 8px 16px;
       font: inherit;
       font-size: 13px;
@@ -352,9 +431,9 @@ export function renderDashboardHtml(
       transition: color 100ms, border-color 100ms;
     }
 
-    .hotspots-tab:hover { color: var(--text); }
+    .stats-tab:hover { color: var(--text); }
 
-    .hotspots-tab.active {
+    .stats-tab.active {
       color: var(--text);
       border-bottom-color: var(--green);
     }
@@ -398,6 +477,14 @@ export function renderDashboardHtml(
     .hotspot-score-badge.low {
       background: var(--green-soft);
       color: var(--green);
+    }
+
+    .hotspot-score-badge.metric {
+      min-width: 44px;
+      width: auto;
+      padding: 0 10px;
+      background: rgba(26, 24, 20, 0.06);
+      color: var(--text);
     }
 
     .hotspot-info {
@@ -862,17 +949,50 @@ export function renderDashboardHtml(
 
     <!-- Health Score -->
     <section class="card section-gap" id="health-section">
+      <div class="section-head" style="padding:20px 20px 0">
+        <div class="section-title-wrap">
+          <div class="section-label">Codebase Health</div>
+          <span class="info-tip">
+            <span class="info-tip-badge" aria-hidden="true">i</span>
+            <span class="info-tip-popup">Health is a weighted score from 0-100.
+
+Cycles: 35% of the score. 100 when there are no cycles, otherwise it drops by cycle density across modules.
+Duplication: 25%. Starts at 100 and drops by 5 points per duplicated-lines percent.
+Unused Code: 25%. Starts at 100 and drops by issue density per file.
+Complexity: 15%. Starts at 100 and drops by total complexity relative to total code.
+
+Missing metrics default to 50. The trend beside the score compares this snapshot with the previous one.</span>
+          </span>
+        </div>
+      </div>
       <div id="health-content"></div>
     </section>
 
-    <!-- Hotspots -->
-    <section class="card section-gap hotspots-panel" id="hotspots-section">
-      <div class="section-label">Hotspots</div>
-      <div class="hotspots-tabs" id="hotspot-tabs">
-        <button type="button" class="hotspots-tab active" data-hotspot-tab="files">Files</button>
-        <button type="button" class="hotspots-tab" data-hotspot-tab="dirs">Directories</button>
+    <!-- Stats -->
+    <section class="card section-gap stats-panel" id="stats-section">
+      <div class="section-head">
+        <div class="section-title-wrap">
+          <div class="section-label">Stats</div>
+          <span class="info-tip">
+            <span class="info-tip-badge" aria-hidden="true">i</span>
+            <span class="info-tip-popup">Large Files ranks the latest snapshot by code lines.
+Complex Files ranks by cyclomatic complexity.
+
+Hot Files score = round(((complexity/max file complexity) * 0.35 + (lines/max file lines) * 0.25 + (issues/max file issues) * 0.40) * 100).
+
+Hot Directories score = round(((issues/max dir issues) * 0.45 + (complexity/max dir complexity) * 0.35 + (lines/max dir lines) * 0.20) * 100).
+
+Hot scores are relative to the latest snapshot, not absolute quality grades.</span>
+          </span>
+        </div>
       </div>
-      <div id="hotspot-content"></div>
+      <div class="stats-tabs" id="stats-tabs">
+        <button type="button" class="stats-tab active" data-stats-tab="large-files">Large Files</button>
+        <button type="button" class="stats-tab" data-stats-tab="complex-files">Complex Files</button>
+        <button type="button" class="stats-tab" data-stats-tab="hot-files">Hot Files</button>
+        <button type="button" class="stats-tab" data-stats-tab="hot-dirs">Hot Directories</button>
+      </div>
+      <div id="stats-content"></div>
     </section>
 
     <!-- Trends -->
@@ -926,7 +1046,7 @@ export function renderDashboardHtml(
     const dashboard = ${payload};
     const charts = [];
     let activeRange = dashboard.controls[0]?.id ?? 'all';
-    let activeHotspotTab = 'files';
+    let activeStatsTab = 'large-files';
     let activeNodeId = null;
     let activeTreeSnapshotId = null;
     const expandedNodes = new Set();
@@ -1131,7 +1251,7 @@ export function renderDashboardHtml(
       '</div>';
     }
 
-    /* ── Hotspots ── */
+    /* ── Stats ── */
     function renderSignalDots(signals) {
       const dims = [
         { key: 'complexity', threshold: 0.3 },
@@ -1150,6 +1270,7 @@ export function renderDashboardHtml(
       return '<div class="hotspot-list">' + items.map(function(h) {
         const tier = scoreTier(100 - h.score);
         const meta = [];
+        if (h.stats.code) meta.push(compact(h.stats.code) + ' code');
         if (h.stats.lines) meta.push(compact(h.stats.lines) + ' lines');
         if (h.stats.complexity) meta.push(compact(h.stats.complexity) + ' complexity');
         if (h.issues.total) meta.push(h.issues.total + ' issue' + (h.issues.total !== 1 ? 's' : ''));
@@ -1164,11 +1285,40 @@ export function renderDashboardHtml(
       }).join('') + '</div>';
     }
 
-    function renderHotspots() {
-      const el = document.getElementById('hotspot-content');
-      el.innerHTML = activeHotspotTab === 'files'
-        ? renderHotspotList(dashboard.fileHotspots)
-        : renderHotspotList(dashboard.dirHotspots);
+    function renderRankedFileList(items, primaryLabel) {
+      if (!items?.length) return '<div class="hotspot-empty">No files found for this ranking.</div>';
+      return '<div class="hotspot-list">' + items.map(function(item) {
+        const meta = [];
+        meta.push(compact(item.stats.code) + ' code');
+        meta.push(compact(item.stats.lines) + ' lines');
+        meta.push(compact(item.stats.complexity) + ' complexity');
+        if (item.issues.total) meta.push(item.issues.total + ' issue' + (item.issues.total !== 1 ? 's' : ''));
+        return '<div class="hotspot-row">' +
+          '<span class="hotspot-score-badge metric" title="' + esc(primaryLabel) + '">' + compact(item.primaryValue) + '</span>' +
+          '<div class="hotspot-info">' +
+            '<div class="hotspot-path">' + esc(item.path) + '</div>' +
+            '<div class="hotspot-meta">' + esc(meta.join(' \\u00b7 ')) + '</div>' +
+          '</div>' +
+          '<div class="hotspot-meta">' + esc(primaryLabel) + '</div>' +
+        '</div>';
+      }).join('') + '</div>';
+    }
+
+    function renderStats() {
+      const el = document.getElementById('stats-content');
+      if (activeStatsTab === 'large-files') {
+        el.innerHTML = renderRankedFileList(dashboard.largeFiles, 'Code lines');
+        return;
+      }
+      if (activeStatsTab === 'complex-files') {
+        el.innerHTML = renderRankedFileList(dashboard.complexFiles, 'Complexity');
+        return;
+      }
+      if (activeStatsTab === 'hot-dirs') {
+        el.innerHTML = renderHotspotList(dashboard.dirHotspots);
+        return;
+      }
+      el.innerHTML = renderHotspotList(dashboard.fileHotspots);
     }
 
     /* ── Trends ── */
@@ -1470,7 +1620,7 @@ export function renderDashboardHtml(
       });
       renderHeader(rows);
       renderHealthScore(rows);
-      renderHotspots();
+      renderStats();
       renderTrends(rows);
       renderTree(rows);
       renderTable(rows);
@@ -1499,14 +1649,14 @@ export function renderDashboardHtml(
       this.textContent = hidden ? 'Show Tree' : 'Hide Tree';
     });
 
-    document.getElementById('hotspot-tabs').addEventListener('click', function(e) {
-      var tab = e.target.closest('[data-hotspot-tab]');
+    document.getElementById('stats-tabs').addEventListener('click', function(e) {
+      var tab = e.target.closest('[data-stats-tab]');
       if (!tab) return;
-      activeHotspotTab = tab.dataset.hotspotTab;
-      this.querySelectorAll('.hotspots-tab').forEach(function(t) {
-        t.classList.toggle('active', t.dataset.hotspotTab === activeHotspotTab);
+      activeStatsTab = tab.dataset.statsTab;
+      this.querySelectorAll('.stats-tab').forEach(function(t) {
+        t.classList.toggle('active', t.dataset.statsTab === activeStatsTab);
       });
-      renderHotspots();
+      renderStats();
     });
 
     document.getElementById('tree-root').addEventListener('click', function(e) {
