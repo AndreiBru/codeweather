@@ -159,7 +159,7 @@ export function computeHotspots(tree: SnapshotTreeIndex, limit = 10): Hotspot[] 
     const instabilitySignal = node.dependency?.instability ?? 0
 
     const score = Math.round(
-      (complexitySignal * 0.3 + sizeSignal * 0.15 + issuesSignal * 0.35 + instabilitySignal * 0.2) * 100,
+      (complexitySignal * 0.35 + sizeSignal * 0.25 + issuesSignal * 0.40) * 100,
     )
 
     return {

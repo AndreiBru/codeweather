@@ -11,6 +11,7 @@ export function renderDashboardHtml(
   cwd: string,
   snapshots: SnapshotSummary[],
   trees: Record<string, SnapshotTreeIndex> = {},
+  latestArtifacts?: { duplicates?: unknown; unused?: unknown },
 ): string {
   const rows = buildDashboardRows(snapshots)
   const range = getSnapshotRange(snapshots)
@@ -37,6 +38,7 @@ export function renderDashboardHtml(
     controls: rangeControls,
     fileHotspots,
     dirHotspots,
+    latestArtifacts: latestArtifacts ?? null,
   })
 
   return `<!doctype html>
@@ -518,8 +520,8 @@ export function renderDashboardHtml(
 
     .tree-layout {
       display: grid;
-      grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.85fr);
-      gap: 12px;
+      grid-template-columns: minmax(280px, 0.95fr) minmax(380px, 1.35fr);
+      gap: 14px;
       align-items: start;
     }
 
@@ -531,6 +533,7 @@ export function renderDashboardHtml(
     }
 
     .tree-shell {
+      min-width: 0;
       min-height: 360px;
       max-height: 56vh;
       overflow: auto;
@@ -634,10 +637,13 @@ export function renderDashboardHtml(
     }
 
     .tree-detail {
+      min-width: 0;
       padding: 16px;
       display: grid;
       gap: 16px;
       min-height: 200px;
+      max-height: 56vh;
+      overflow: auto;
     }
 
     .tree-detail h3 {
@@ -689,11 +695,78 @@ export function renderDashboardHtml(
     .tree-detail-list-row {
       display: flex;
       justify-content: space-between;
+      align-items: start;
+      gap: 10px;
       padding: 4px 0;
       border-bottom: 1px solid var(--border);
     }
 
     .tree-detail-list-row:last-child { border-bottom: 0; }
+
+    .duplicate-entry {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .duplicate-entry + .duplicate-entry { margin-top: 8px; }
+
+    .duplicate-toggle {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 12px;
+      padding: 10px 12px;
+    }
+
+    .duplicate-toggle::-webkit-details-marker { display: none; }
+
+    .duplicate-toggle-main {
+      min-width: 0;
+      display: grid;
+      gap: 4px;
+    }
+
+    .duplicate-target {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text);
+      word-break: break-word;
+    }
+
+    .duplicate-meta,
+    .duplicate-expand-hint,
+    .unused-detail-note {
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
+
+    .duplicate-expand-hint {
+      white-space: nowrap;
+      margin-top: 1px;
+    }
+
+    .duplicate-entry[open] .duplicate-expand-hint { color: var(--amber); }
+
+    .duplicate-fragment {
+      margin: 0;
+      padding: 12px;
+      border-top: 1px solid var(--border);
+      background: #f4efe7;
+      color: var(--text);
+      font: 12px/1.5 var(--font-mono);
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .tree-detail-empty {
+      font-size: 12px;
+      color: var(--text-tertiary);
+    }
 
     /* ── Table ── */
     .table-panel { padding: 20px; }
@@ -869,6 +942,93 @@ export function renderDashboardHtml(
       if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(1)+'k';
       return n.toLocaleString('en-US');
     };
+    const unusedTypeLabels = {
+      dependencies: 'Unused dependency',
+      devDependencies: 'Unused devDependency',
+      optionalPeerDependencies: 'Unused optional peer dependency',
+      unlisted: 'Unlisted dependency',
+      binaries: 'Unused binary',
+      unresolved: 'Unresolved import',
+      exports: 'Unused export',
+      nsExports: 'Unused namespace export',
+      classMembers: 'Unused class member',
+      types: 'Unused type',
+      nsTypes: 'Unused namespace type',
+      enumMembers: 'Unused enum member',
+      duplicates: 'Duplicate entry',
+      catalog: 'Unused catalog entry',
+    };
+
+    function formatLineRange(file) {
+      if (!file) return 'lines ?';
+      var start = file.startLoc?.line ?? file.start ?? '?';
+      var end = file.endLoc?.line ?? file.end ?? start;
+      return start === end ? 'line ' + start : 'lines ' + start + '\\u2013' + end;
+    }
+
+    function flattenArtifactEntries(value) {
+      var items = [];
+
+      function visit(entry) {
+        if (Array.isArray(entry)) {
+          entry.forEach(visit);
+          return;
+        }
+        if (entry && typeof entry === 'object') {
+          if (
+            'name' in entry ||
+            'symbol' in entry ||
+            'path' in entry ||
+            'file' in entry ||
+            'line' in entry ||
+            'col' in entry
+          ) {
+            items.push(entry);
+            return;
+          }
+          Object.values(entry).forEach(visit);
+          return;
+        }
+        if (typeof entry === 'string') {
+          items.push({ name: entry });
+        }
+      }
+
+      visit(value);
+      return items;
+    }
+
+    function collectUnusedItems(artifact, nodePath) {
+      var items = [];
+      var seen = new Set();
+
+      flattenArtifactEntries(artifact?.files).forEach(function(fileEntry) {
+        var filePath = fileEntry.path || fileEntry.file || fileEntry.name;
+        if (filePath !== nodePath) return;
+        if (seen.has('Entire file unused')) return;
+        seen.add('Entire file unused');
+        items.push({ label: 'Entire file unused' });
+      });
+
+      if (!Array.isArray(artifact?.issues)) return items;
+
+      artifact.issues.forEach(function(issue) {
+        if (issue.file !== nodePath) return;
+
+        Object.keys(unusedTypeLabels).forEach(function(groupKey) {
+          flattenArtifactEntries(issue[groupKey]).forEach(function(entry) {
+            var subject = entry.symbol || entry.name || entry.path || entry.file || '?';
+            var line = entry.line != null ? ' (line ' + entry.line + ')' : '';
+            var label = unusedTypeLabels[groupKey] + ': ' + subject + line;
+            if (seen.has(label)) return;
+            seen.add(label);
+            items.push({ label: label });
+          });
+        });
+      });
+
+      return items;
+    }
 
     function getRows(rangeId) {
       if (rangeId === 'all') return dashboard.rows;
@@ -977,9 +1137,8 @@ export function renderDashboardHtml(
         { key: 'complexity', threshold: 0.3 },
         { key: 'size', threshold: 0.3 },
         { key: 'issues', threshold: 0.1 },
-        { key: 'instability', threshold: 0.3 },
       ];
-      return '<span class="hotspot-signals" title="complexity / size / issues / instability">' +
+      return '<span class="hotspot-signals" title="complexity / size / issues">' +
         dims.map(function(d) {
           return '<span class="signal-dot ' + d.key + (signals[d.key] >= d.threshold ? ' active' : '') + '"></span>';
         }).join('') +
@@ -1171,6 +1330,60 @@ export function renderDashboardHtml(
           '</div></div>';
       }
 
+      var dupSection = '';
+      if (node.kind === 'file' && node.issues.duplication > 0 && dashboard.latestArtifacts?.duplicates?.duplicates) {
+        var clones = dashboard.latestArtifacts.duplicates.duplicates.filter(function(d) {
+          return d.firstFile?.name === node.path || d.secondFile?.name === node.path;
+        });
+        if (clones.length > 0) {
+          dupSection = '<div>' +
+            '<div class="tree-detail-section-title">Duplicates</div>' +
+            '<div>' +
+            clones.map(function(c) {
+              var selfFile = c.firstFile?.name === node.path ? c.firstFile : c.secondFile;
+              var other = c.firstFile?.name === node.path ? c.secondFile : c.firstFile;
+              var otherName = other?.name || '?';
+              var lines = c.lines || '?';
+              var selfLabel = 'This file ' + formatLineRange(selfFile);
+              var otherLabel = (otherName === node.path ? 'Matching copy ' : esc(otherName) + ' ') + formatLineRange(other);
+              var fragment = c.fragment
+                ? '<pre class="duplicate-fragment">' + esc(c.fragment) + '</pre>'
+                : '<div class="duplicate-fragment tree-detail-empty">No fragment captured for this clone.</div>';
+              return '<details class="duplicate-entry">' +
+                '<summary class="duplicate-toggle">' +
+                  '<span class="duplicate-toggle-main">' +
+                    '<span class="duplicate-target">' + esc(otherName) + '</span>' +
+                    '<span class="duplicate-meta">' + selfLabel + ' \\u00b7 ' + otherLabel + ' \\u00b7 ' + lines + ' lines</span>' +
+                  '</span>' +
+                  '<span class="duplicate-expand-hint">Show fragment</span>' +
+                '</summary>' +
+                fragment +
+              '</details>';
+            }).join('') +
+            '</div></div>';
+        }
+      }
+
+      var unusedSection = '';
+      if (node.kind === 'file' && node.issues.unused > 0 && dashboard.latestArtifacts?.unused) {
+        var items = collectUnusedItems(dashboard.latestArtifacts.unused, node.path);
+
+        if (items.length > 0) {
+          unusedSection = '<div>' +
+            '<div class="tree-detail-section-title">Unused Code</div>' +
+            '<div class="tree-detail-list">' +
+            items.map(function(item) {
+              return '<div class="tree-detail-list-row"><span style="font-size:12px">' + esc(item.label) + '</span></div>';
+            }).join('') +
+            '</div></div>';
+        } else {
+          unusedSection = '<div>' +
+            '<div class="tree-detail-section-title">Unused Code</div>' +
+            '<div class="tree-detail-empty">No detailed unused-code entries were found in the latest snapshot artifact.</div>' +
+          '</div>';
+        }
+      }
+
       detail.innerHTML =
         '<div>' +
           '<h3>' + esc(node.name || node.path) + '</h3>' +
@@ -1193,7 +1406,9 @@ export function renderDashboardHtml(
             '<div class="tree-detail-list-row"><span>Cycles</span><strong>' + fmt(node.issues.cycles) + '</strong></div>' +
           '</div>' +
         '</div>' +
-        depSection;
+        depSection +
+        dupSection +
+        unusedSection;
     }
 
     function renderTree(rows) {

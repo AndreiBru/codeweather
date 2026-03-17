@@ -222,13 +222,24 @@ const dashboardCommand = defineCommand({
       ? resolve(config.cwd, args.output as string)
       : resolve(historyDir, 'dashboard.html')
     mkdirSync(dirname(outputPath), { recursive: true })
+    let latestArtifacts: { duplicates?: unknown; unused?: unknown } | undefined
     const trees = Object.fromEntries(
       snapshots.flatMap((snapshot) => {
         const bundle = loadSnapshotBundle(config.cwd, config.history.dir, snapshot.id)
-        return bundle ? [[snapshot.id, bundle.tree] as const] : []
+        if (!bundle) return []
+        if (snapshot.id === snapshots[snapshots.length - 1].id && bundle.artifacts) {
+          const raw: Record<string, unknown> = {}
+          if (bundle.artifacts.duplicates) {
+            const dup = bundle.artifacts.duplicates as Record<string, unknown>
+            raw.duplicates = dup
+          }
+          if (bundle.artifacts.unused) raw.unused = bundle.artifacts.unused
+          if (raw.duplicates || raw.unused) latestArtifacts = raw
+        }
+        return [[snapshot.id, bundle.tree] as const]
       }),
     )
-    const html = renderDashboardHtml(config.cwd, snapshots, trees)
+    const html = renderDashboardHtml(config.cwd, snapshots, trees, latestArtifacts)
     writeFileSync(outputPath, html)
 
     if (config.json) {

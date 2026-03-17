@@ -219,6 +219,47 @@ describe('dashboard rendering', () => {
           },
         },
       },
+    }, {
+      duplicates: {
+        duplicates: [
+          {
+            lines: 3,
+            fragment: 'const shared = true',
+            firstFile: {
+              name: 'src/app.ts',
+              startLoc: { line: 10 },
+              endLoc: { line: 12 },
+            },
+            secondFile: {
+              name: 'src/lib.ts',
+              startLoc: { line: 20 },
+              endLoc: { line: 22 },
+            },
+          },
+        ],
+      },
+      unused: {
+        files: [],
+        issues: [
+          {
+            file: 'src/app.ts',
+            exports: [{ name: 'unusedThing', line: 9 }],
+            dependencies: [],
+            devDependencies: [],
+            optionalPeerDependencies: [],
+            unlisted: [],
+            binaries: [],
+            unresolved: [],
+            nsExports: [],
+            classMembers: [],
+            types: [],
+            nsTypes: [],
+            enumMembers: {},
+            duplicates: [],
+            catalog: [],
+          },
+        ],
+      },
     })
 
     expect(html).toContain('<!doctype html>')
@@ -232,5 +273,8 @@ describe('dashboard rendering', () => {
     expect(html).toContain('Codebase Tree')
     expect(html).toContain('app.ts')
     expect(html).toContain('Trends')
+    expect(html).toContain('Show fragment')
+    expect(html).toContain('const shared = true')
+    expect(html).toContain('Unused export')
   })
 })
